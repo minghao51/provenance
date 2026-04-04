@@ -106,3 +106,23 @@ outputs/
 wandb/
 logs/
 *.log
+
+# Build artifacts
+benchmark_results/
+.planning/
+
+# Documentation artifacts
+docs/benchmark-results.md
+docs/implementation-plan.md
+docs/methodology/
+technical_roadmap.md
+
+# Build artifacts
+benchmark_results/
+.planning/
+
+# Documentation artifacts
+docs/benchmark-results.md
+docs/implementation-plan.md
+docs/methodology/
+technical_roadmap.md

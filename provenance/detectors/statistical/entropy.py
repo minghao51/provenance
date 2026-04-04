@@ -6,9 +6,17 @@ import math
 import re
 from collections import Counter
 
-import nltk
-
 from provenance.core.base import BaseDetector, DetectorResult
+
+try:
+    import nltk
+    from nltk.corpus import brown
+
+    NLTK_AVAILABLE = True
+except ImportError:
+    nltk = None
+    brown = None
+    NLTK_AVAILABLE = False
 
 BROWN_CORPUS_URL = "https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages/corpora/brown.zip"
 
@@ -23,16 +31,16 @@ class EntropyDetector(BaseDetector):
         self._load_brown_frequencies()
 
     def _load_brown_frequencies(self) -> None:
+        if not NLTK_AVAILABLE:
+            return
         try:
-            from nltk.corpus import brown
-
             words = brown.words()
             self.word_frequencies = Counter(w.lower() for w in words if w.isalpha())
         except LookupError:
             nltk.download("brown", quiet=True)
-            from nltk.corpus import brown
+            from nltk.corpus import brown as brown_corpus
 
-            words = brown.words()
+            words = brown_corpus.words()
             self.word_frequencies = Counter(w.lower() for w in words if w.isalpha())
 
     def _compute_unigram_entropy(self, text: str) -> float:
@@ -102,4 +110,5 @@ class EntropyDetector(BaseDetector):
 
 
 def register(registry=None) -> None:
-    registry.register(EntropyDetector)
+    if NLTK_AVAILABLE:
+        registry.register(EntropyDetector)

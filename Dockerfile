@@ -3,18 +3,18 @@ FROM python:3.11-slim AS base
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PYTHONUNBUFFERED=1
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends gcc && \
+    apt-get install -y --no-install-recommends gcc curl && \
     rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml .
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.cargo/bin:${PATH}"
 
-RUN pip install --upgrade pip && \
-    pip install ".[all]"
+COPY pyproject.toml uv.lock ./
+
+RUN uv pip install --system ".[all]"
 
 COPY . .
 

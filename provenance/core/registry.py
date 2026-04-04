@@ -3,10 +3,13 @@ from __future__ import annotations
 import importlib
 import importlib.metadata
 import os
+import threading
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from .base import BaseDetector
+
+_registry_lock = threading.Lock()
 
 
 class DetectorRegistry:
@@ -16,16 +19,20 @@ class DetectorRegistry:
 
     def __new__(cls) -> DetectorRegistry:
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._detectors = {}
-            cls._instance._entry_points_loaded = False
+            with _registry_lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._detectors = {}
+                    cls._instance._entry_points_loaded = False
         return cls._instance
 
     def register(self, detector_class: type[BaseDetector]) -> None:
-        self._detectors[detector_class.name] = detector_class
+        with _registry_lock:
+            self._detectors[detector_class.name] = detector_class
 
     def get(self, name: str) -> BaseDetector | None:
-        detector_class = self._detectors.get(name)
+        with _registry_lock:
+            detector_class = self._detectors.get(name)
         if detector_class is None:
             return None
         return detector_class()
@@ -35,8 +42,10 @@ class DetectorRegistry:
         latency_tier: Literal["fast", "medium", "slow"] | None = None,
         domain: str | None = None,
     ) -> list[BaseDetector]:
+        with _registry_lock:
+            detector_classes = list(self._detectors.values())
         results: list[BaseDetector] = []
-        for detector_class in self._detectors.values():
+        for detector_class in detector_classes:
             detector = detector_class()
             if latency_tier is not None and detector.latency_tier != latency_tier:
                 continue
@@ -46,9 +55,13 @@ class DetectorRegistry:
         return results
 
     def load_entry_points(self, force: bool = False) -> None:
-        if self._entry_points_loaded and not force:
+        with _registry_lock:
+            already_loaded = self._entry_points_loaded
+        if already_loaded and not force:
             return
         if os.environ.get("PROVENANCE_SKIP_ENTRY_POINTS"):
+            with _registry_lock:
+                self._entry_points_loaded = True
             return
         try:
             eps = importlib.metadata.entry_points(group="provenance.detectors")
@@ -61,11 +74,13 @@ class DetectorRegistry:
                     pass
         except Exception:
             pass
-        self._entry_points_loaded = True
+        with _registry_lock:
+            self._entry_points_loaded = True
 
     def clear(self) -> None:
-        self._detectors.clear()
-        self._entry_points_loaded = False
+        with _registry_lock:
+            self._detectors.clear()
+            self._entry_points_loaded = False
 
 
 def get_registry() -> DetectorRegistry:
