@@ -1,0 +1,24 @@
+services:
+  provenance-api:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    volumes:
+      - ./models:/app/models
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: "2"
+
+  provenance-cli:
+    build: .
+    profiles:
+      - cli
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    command: detect --file /app/data/input.txt --output json

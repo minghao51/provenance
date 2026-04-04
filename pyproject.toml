@@ -1,0 +1,139 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "provenance"
+version = "0.1.0"
+description = "A modular, explainable, composable library for detecting AI-generated text"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Provenance AI Team", email = "team@provenance.ai"}
+]
+keywords = ["ai-detection", "text-analysis", "nlp", "machine-learning", "llm"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: General",
+]
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "spacy>=3.7",
+    "langdetect",
+    "numpy",
+    "scipy",
+    "click>=8.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "black>=23.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0",
+    "pre-commit>=3.0",
+]
+statistical = [
+    "transformers>=4.35",
+    "torch>=2.0",
+    "nltk>=3.8",
+]
+stylometric = [
+    "textstat>=0.7",
+    "nltk>=3.8",
+]
+ml = [
+    "lightgbm>=4.0",
+    "shap>=0.42",
+    "optuna>=3.0",
+    "scikit-learn>=1.3",
+]
+transformer = [
+    "transformers>=4.35",
+    "torch>=2.0",
+    "captum>=0.6",
+]
+llm = [
+    "ollama>=0.1",
+    "litellm>=1.0",
+]
+serve = [
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.23",
+    "pydantic>=2.0",
+]
+all = [
+    "spacy>=3.7",
+    "langdetect",
+    "numpy",
+    "scipy",
+    "transformers>=4.35",
+    "torch>=2.0",
+    "nltk>=3.8",
+    "textstat>=0.7",
+    "lightgbm>=4.0",
+    "shap>=0.42",
+    "optuna>=3.0",
+    "scikit-learn>=1.3",
+    "captum>=0.6",
+    "ollama>=0.1",
+    "litellm>=1.0",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.23",
+    "pydantic>=2.0",
+]
+
+[project.scripts]
+provenance = "provenance.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/provenance-ai/provenance"
+Documentation = "https://provenance-ai.readthedocs.io"
+Repository = "https://github.com/provenance-ai/provenance"
+"Bug Tracker" = "https://github.com/provenance-ai/provenance/issues"
+
+[project.entry-points."provenance.detectors"]
+statistical = "provenance.detectors.statistical:register"
+stylometric = "provenance.detectors.stylometric:register"
+transformer = "provenance.detectors.transformer:register"
+llm = "provenance.detectors.llm:register"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["provenance*"]
+
+[tool.setuptools.package-data]
+provenance = ["py.typed"]
+
+[tool.black]
+line-length = 88
+target-version = ["py310", "py311", "py312"]
+include = '\.pyi?$'
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"

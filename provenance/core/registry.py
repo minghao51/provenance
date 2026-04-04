@@ -1,0 +1,72 @@
+from __future__ import annotations
+
+import importlib
+import importlib.metadata
+import os
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from .base import BaseDetector
+
+
+class DetectorRegistry:
+    _instance: DetectorRegistry | None = None
+    _detectors: dict[str, type[BaseDetector]]
+    _entry_points_loaded: bool = False
+
+    def __new__(cls) -> DetectorRegistry:
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._detectors = {}
+            cls._instance._entry_points_loaded = False
+        return cls._instance
+
+    def register(self, detector_class: type[BaseDetector]) -> None:
+        self._detectors[detector_class.name] = detector_class
+
+    def get(self, name: str) -> BaseDetector | None:
+        detector_class = self._detectors.get(name)
+        if detector_class is None:
+            return None
+        return detector_class()
+
+    def list_detectors(
+        self,
+        latency_tier: Literal["fast", "medium", "slow"] | None = None,
+        domain: str | None = None,
+    ) -> list[BaseDetector]:
+        results: list[BaseDetector] = []
+        for detector_class in self._detectors.values():
+            detector = detector_class()
+            if latency_tier is not None and detector.latency_tier != latency_tier:
+                continue
+            if domain is not None and domain not in detector.domains:
+                continue
+            results.append(detector)
+        return results
+
+    def load_entry_points(self, force: bool = False) -> None:
+        if self._entry_points_loaded and not force:
+            return
+        if os.environ.get("PROVENANCE_SKIP_ENTRY_POINTS"):
+            return
+        try:
+            eps = importlib.metadata.entry_points(group="provenance.detectors")
+            for ep in eps:
+                try:
+                    module = importlib.import_module(ep.module)
+                    if hasattr(module, "register"):
+                        module.register(self)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        self._entry_points_loaded = True
+
+    def clear(self) -> None:
+        self._detectors.clear()
+        self._entry_points_loaded = False
+
+
+def get_registry() -> DetectorRegistry:
+    return DetectorRegistry()
