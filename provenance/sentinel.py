@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Literal
 
 from provenance.core.base import DetectorResult, SentinelResult, TokenScore
+from provenance.core.config import ProvenanceConfig
 from provenance.core.ensemble import Ensemble, EnsembleConfig
 from provenance.core.preprocessor import Preprocessor
 from provenance.core.registry import get_registry
@@ -26,7 +27,9 @@ class Provenance:
         weights: dict[str, float] | None = None,
         latency_budget: Literal["fast", "medium", "slow"] | None = None,
         preprocessor: Preprocessor | None = None,
+        config: ProvenanceConfig | None = None,
     ):
+        self.config = config or ProvenanceConfig()
         self.preprocessor = preprocessor or Preprocessor()
         self.registry = get_registry()
         self.registry.load_entry_points()
@@ -132,19 +135,21 @@ class Provenance:
             label=label,
             confidence=avg_confidence,
             detector_scores=aggregated_detector_scores,
-            heatmap=all_heatmaps[:200],
+            heatmap=all_heatmaps[: self.config.max_heatmap_tokens],
             sentence_scores=sentence_scores,
             feature_vector=merged_feature_vector,
-            top_features=all_top_features[:20],
+            top_features=all_top_features[: self.config.max_top_features],
         )
 
     def detect(self, text: str) -> SentinelResult:
         preprocessed = self.preprocessor.preprocess(text)
 
-        if len(preprocessed.sentences) == 0 or len(text.split()) < self.MIN_TEXT_LENGTH:
-            short_text_warning = (
-                "Text is shorter than recommended minimum (150 words). "
-                "Results may be unreliable."
+        if (
+            len(preprocessed.sentences) == 0
+            or len(text.split()) < self.config.min_text_length
+        ):
+            short_text_warning = self.config.short_text_warning_template.format(
+                min_length=self.config.min_text_length
             )
             dummy_result = DetectorResult(
                 score=0.5,
@@ -154,7 +159,7 @@ class Provenance:
             return SentinelResult(
                 score=0.5,
                 label="uncertain",
-                confidence=0.3,
+                confidence=self.config.short_text_confidence,
                 detector_scores={"short_text_warning": dummy_result},
                 heatmap=[],
                 sentence_scores=[],

@@ -265,9 +265,7 @@ class Ensemble:
         if not texts or len(texts) < 10:
             return self.config.weights
 
-        detector_scores: dict[str, list[float]] = {
-            d.name: [] for d in self.detectors
-        }
+        detector_scores: dict[str, list[float]] = {d.name: [] for d in self.detectors}
 
         for text in texts:
             for detector in self.detectors:

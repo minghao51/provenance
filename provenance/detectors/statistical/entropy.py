@@ -5,8 +5,10 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
+from functools import lru_cache
 
 from provenance.core.base import BaseDetector, DetectorResult
+from provenance.core.calibration import CalibratedDetectorMixin
 
 try:
     import nltk
@@ -21,7 +23,7 @@ except ImportError:
 BROWN_CORPUS_URL = "https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages/corpora/brown.zip"
 
 
-class EntropyDetector(BaseDetector):
+class EntropyDetector(CalibratedDetectorMixin, BaseDetector):
     name = "entropy"
     latency_tier = "fast"
     domains = ["prose", "academic"]
@@ -43,6 +45,7 @@ class EntropyDetector(BaseDetector):
             words = brown_corpus.words()
             self.word_frequencies = Counter(w.lower() for w in words if w.isalpha())
 
+    @lru_cache(maxsize=256)  # noqa: B019
     def _compute_unigram_entropy(self, text: str) -> float:
         words = re.findall(r"\b[a-zA-Z]+\b", text.lower())
         if not words:
@@ -59,6 +62,7 @@ class EntropyDetector(BaseDetector):
 
         return entropy
 
+    @lru_cache(maxsize=256)  # noqa: B019
     def _compute_kl_divergence(self, text: str) -> float:
         words = re.findall(r"\b[a-zA-Z]+\b", text.lower())
         if not words or not self.word_frequencies:
@@ -81,22 +85,35 @@ class EntropyDetector(BaseDetector):
 
         return kl_div
 
+    def _extract_features(self, text: str) -> list[float]:
+        return [
+            self._compute_unigram_entropy(text),
+            self._compute_kl_divergence(text),
+        ]
+
+    def _extract_feature_names(self) -> list[str]:
+        return ["unigram_entropy", "kl_divergence"]
+
     def detect(self, text: str) -> DetectorResult:
         text_entropy = self._compute_unigram_entropy(text)
         kl_div = self._compute_kl_divergence(text)
 
-        if kl_div > 2.0:
-            score = 0.8
-            confidence = 0.7
-        elif kl_div > 1.0:
-            score = 0.6
-            confidence = 0.6
-        elif kl_div > 0.5:
-            score = 0.4
-            confidence = 0.5
+        calibrated = self._get_calibrated_score(text)
+        if calibrated is not None:
+            score, confidence = calibrated
         else:
-            score = 0.2
-            confidence = 0.6
+            if kl_div > 2.0:
+                score = 0.8
+                confidence = 0.7
+            elif kl_div > 1.0:
+                score = 0.6
+                confidence = 0.6
+            elif kl_div > 0.5:
+                score = 0.4
+                confidence = 0.5
+            else:
+                score = 0.2
+                confidence = 0.6
 
         return DetectorResult(
             score=score,
@@ -105,6 +122,7 @@ class EntropyDetector(BaseDetector):
                 "text_entropy": text_entropy,
                 "kl_divergence": kl_div,
                 "vocabulary_size": len(set(re.findall(r"\b[a-zA-Z]+\b", text.lower()))),
+                "calibrated": calibrated is not None,
             },
         )
 

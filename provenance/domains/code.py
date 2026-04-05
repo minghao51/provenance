@@ -7,6 +7,7 @@ import re
 from collections import Counter
 
 from provenance.core.base import BaseDetector, DetectorResult
+from provenance.core.calibration import CalibratedDetectorMixin
 
 try:
     import tree_sitter
@@ -16,7 +17,7 @@ except ImportError:
     Parser = None
 
 
-class CodeDetector(BaseDetector):
+class CodeDetector(CalibratedDetectorMixin, BaseDetector):
     name = "code_detector"
     latency_tier = "medium"
     domains = ["code"]
@@ -116,6 +117,28 @@ class CodeDetector(BaseDetector):
         lines = [line for line in code.split("\n") if line.strip()]
         return float(count / len(lines)) if lines else 0.0
 
+    def _extract_features(self, text: str) -> list[float]:
+        ast_features = self._compute_ast_features(text, "python")
+        logical_complexity = self._compute_logical_complexity(text)
+        return [
+            ast_features.get("function_count", 0.0),
+            ast_features.get("avg_function_depth", 0.0),
+            ast_features.get("max_function_depth", 0.0),
+            ast_features.get("low_entropy_variable_ratio", 0.0),
+            ast_features.get("comment_to_code_ratio", 0.0),
+            logical_complexity,
+        ]
+
+    def _extract_feature_names(self) -> list[str]:
+        return [
+            "function_count",
+            "avg_function_depth",
+            "max_function_depth",
+            "low_entropy_variable_ratio",
+            "comment_to_code_ratio",
+            "logical_complexity",
+        ]
+
     def detect(self, text: str) -> DetectorResult:
         ast_features = self._compute_ast_features(text, "python")
         logical_complexity = self._compute_logical_complexity(text)
@@ -127,22 +150,26 @@ class CodeDetector(BaseDetector):
                 metadata={"error": "Could not parse as code", "features": ast_features},
             )
 
-        low_entropy_score = ast_features.get("low_entropy_variable_ratio", 0)
-        depth_score = min(1.0, ast_features.get("max_function_depth", 0) / 10)
-        comment_ratio = ast_features.get("comment_to_code_ratio", 0)
-
-        if low_entropy_score > 0.3:
-            score = 0.7
-            confidence = 0.7
-        elif depth_score < 0.3 and comment_ratio < 0.1:
-            score = 0.65
-            confidence = 0.6
-        elif logical_complexity < 0.2:
-            score = 0.6
-            confidence = 0.5
+        calibrated = self._get_calibrated_score(text)
+        if calibrated is not None:
+            score, confidence = calibrated
         else:
-            score = 0.3
-            confidence = 0.4
+            low_entropy_score = ast_features.get("low_entropy_variable_ratio", 0)
+            depth_score = min(1.0, ast_features.get("max_function_depth", 0) / 10)
+            comment_ratio = ast_features.get("comment_to_code_ratio", 0)
+
+            if low_entropy_score > 0.3:
+                score = 0.7
+                confidence = 0.7
+            elif depth_score < 0.3 and comment_ratio < 0.1:
+                score = 0.65
+                confidence = 0.6
+            elif logical_complexity < 0.2:
+                score = 0.6
+                confidence = 0.5
+            else:
+                score = 0.3
+                confidence = 0.4
 
         return DetectorResult(
             score=score,
@@ -150,6 +177,7 @@ class CodeDetector(BaseDetector):
             metadata={
                 **ast_features,
                 "logical_complexity": logical_complexity,
+                "calibrated": calibrated is not None,
             },
         )
 

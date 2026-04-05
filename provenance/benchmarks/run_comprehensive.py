@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import time
 from datetime import datetime
 from pathlib import Path
@@ -12,9 +11,7 @@ from provenance.benchmarks.workflow import (
     BenchmarkResult,
     BenchmarkRunner,
     BenchmarkSuite,
-    DatasetConfig,
     DatasetRegistry,
-    HuggingFaceDatasetLoader,
 )
 
 
@@ -136,9 +133,9 @@ def run_comprehensive_benchmark(
             print(f"Dataset {dataset_name} not found")
             continue
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Loading {dataset_name} dataset...")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         try:
             texts, labels, metadata = evaluator.dataset_loader.load(
@@ -148,7 +145,9 @@ def run_comprehensive_benchmark(
             print(f"Failed to load {dataset_name}: {e}")
             continue
 
-        print(f"Loaded {len(texts)} samples ({sum(labels)} AI, {len(labels) - sum(labels)} human)")
+        print(
+            f"Loaded {len(texts)} samples ({sum(labels)} AI, {len(labels) - sum(labels)} human)"
+        )
 
         if not texts:
             continue
@@ -162,9 +161,9 @@ def run_comprehensive_benchmark(
             detector_categories.append(("Transformer", get_transformer_detectors))
 
         for category_name, detector_fn in detector_categories:
-            print(f"\n{'='*60}")
+            print(f"\n{'=' * 60}")
             print(f"Running {category_name} detectors...")
-            print(f"{'='*60}")
+            print(f"{'=' * 60}")
 
             detectors = detector_fn()
 
@@ -206,9 +205,9 @@ def run_comprehensive_benchmark(
 
     runner.generate_report(suite, output_format="all")
 
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print("SUMMARY TABLE")
-    print(f"{'='*80}")
+    print(f"{'=' * 80}")
     print(
         f"{'Detector':<30} {'AUROC':>8} {'F1':>8} {'FPR@10TPR':>10} {'Precision':>10} {'Recall':>8} {'Time(s)':>8}"
     )
@@ -230,7 +229,11 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Run comprehensive detector benchmark")
     parser.add_argument(
-        "-l", "--sample-limit", type=int, default=50, help="Number of samples per dataset"
+        "-l",
+        "--sample-limit",
+        type=int,
+        default=50,
+        help="Number of samples per dataset",
     )
     parser.add_argument(
         "--output", default="benchmark_results", help="Output directory"

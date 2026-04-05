@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 
 from provenance.core.base import BaseDetector, DetectorResult
@@ -107,7 +108,9 @@ Text: {text}"""
                 perturbed = response["choices"][0]["message"]["content"]
                 perturbations.append(perturbed)
             except Exception:
-                pass
+                logging.getLogger(__name__).warning(
+                    "Failed to generate perturbation %d", len(perturbations) + 1
+                )
 
         return perturbations
 
@@ -261,7 +264,7 @@ Return a JSON object with your analysis:
                     },
                 )
         except Exception:
-            pass
+            logging.getLogger(__name__).warning("LLM meta reasoning failed")
 
         return DetectorResult(
             score=0.5,

@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import math
 import re
 import statistics
 from collections import Counter
+from typing import cast
 
 import nltk
 import spacy
 import textstat
 
 from provenance.core.base import BaseDetector, DetectorResult
+from provenance.core.calibration import CalibratedDetectorMixin
 
 
 class FeatureExtractor:
@@ -416,7 +419,9 @@ class FeatureExtractor:
                 return default_result
 
             mean_s = sum(surprisals) / len(surprisals)
-            std_s = (sum((s - mean_s) ** 2 for s in surprisals) / len(surprisals)) ** 0.5
+            std_s = (
+                sum((s - mean_s) ** 2 for s in surprisals) / len(surprisals)
+            ) ** 0.5
             cv_s = std_s / mean_s if mean_s > 0 else 0.0
 
             n = len(surprisals)
@@ -426,7 +431,7 @@ class FeatureExtractor:
                     (surprisals[i] - mean_s) * (surprisals[i + 1] - mean_s)
                     for i in range(n - 1)
                 ) / (n - 1)
-                autocorr = autocov / (std_s ** 2)
+                autocorr = autocov / (std_s**2)
 
             total = sum(surprisals)
             entropy = 0.0
@@ -454,7 +459,7 @@ class FeatureExtractor:
         return sorted(features.keys())
 
 
-class StylometricDetector(BaseDetector):
+class StylometricDetector(CalibratedDetectorMixin, BaseDetector):
     name = "stylometric"
     latency_tier = "fast"
     domains = ["prose", "academic"]
@@ -462,27 +467,42 @@ class StylometricDetector(BaseDetector):
     def __init__(self):
         self.extractor = FeatureExtractor()
 
+    def _extract_features(self, text: str) -> list[float]:
+        features = self.extractor.extract(text)
+        return cast(list[float], self.extractor.to_vector(features))
+
+    def _extract_feature_names(self) -> list[str]:
+        return cast(list[str], self.extractor.get_feature_names())
+
     def detect(self, text: str) -> DetectorResult:
         features = self.extractor.extract(text)
         vector = self.extractor.to_vector(features)
 
-        if features.get("std_sentence_length", 0) < 3:
-            score = 0.7
-            confidence = 0.6
-        elif features.get("ttr", 1) < 0.4:
-            score = 0.6
-            confidence = 0.5
-        elif features.get("hapax_ratio", 0) < 0.2:
-            score = 0.55
-            confidence = 0.5
+        calibrated = self._get_calibrated_score(text)
+        if calibrated is not None:
+            score, confidence = calibrated
         else:
-            score = 0.3
-            confidence = 0.4
+            if features.get("std_sentence_length", 0) < 3:
+                score = 0.7
+                confidence = 0.6
+            elif features.get("ttr", 1) < 0.4:
+                score = 0.6
+                confidence = 0.5
+            elif features.get("hapax_ratio", 0) < 0.2:
+                score = 0.55
+                confidence = 0.5
+            else:
+                score = 0.3
+                confidence = 0.4
 
         return DetectorResult(
             score=score,
             confidence=confidence,
-            metadata={"features": features, "vector": vector},
+            metadata={
+                "features": features,
+                "vector": vector,
+                "calibrated": calibrated is not None,
+            },
         )
 
 

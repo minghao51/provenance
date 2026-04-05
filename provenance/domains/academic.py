@@ -5,14 +5,15 @@ from __future__ import annotations
 import re
 
 from provenance.core.base import BaseDetector, DetectorResult
+from provenance.core.calibration import CalibratedDetectorMixin
 
 try:
     from transformers import pipeline
 except ImportError:
-    pipeline = None
+    pipeline = None  # type: ignore[assignment,misc]
 
 
-class AcademicDetector(BaseDetector):
+class AcademicDetector(CalibratedDetectorMixin, BaseDetector):
     name = "academic_detector"
     latency_tier = "medium"
     domains = ["academic"]
@@ -136,6 +137,25 @@ class AcademicDetector(BaseDetector):
             "certainty_ratio": certainty_count / len(word_set),
         }
 
+    def _extract_features(self, text: str) -> list[float]:
+        citations = self._extract_citations(text)
+        citation_analysis = self._check_citation_formatting(citations)
+        complexity = self._analyze_language_complexity(text)
+        claims = self._analyze_claim_language(text)
+        features = {**citation_analysis, **complexity, **claims}
+        return [features.get(k, 0.0) for k in self._extract_feature_names()]
+
+    def _extract_feature_names(self) -> list[str]:
+        return [
+            "citation_format_score",
+            "potential_hallucinations",
+            "avg_word_length",
+            "latin_abbreviation_ratio",
+            "passive_ratio",
+            "hedging_ratio",
+            "certainty_ratio",
+        ]
+
     def detect(self, text: str) -> DetectorResult:
         citations = self._extract_citations(text)
         citation_analysis = self._check_citation_formatting(citations)
@@ -144,22 +164,26 @@ class AcademicDetector(BaseDetector):
 
         features = {**citation_analysis, **complexity, **claims}
 
-        hallucination_risk = citation_analysis.get("potential_hallucinations", 0)
-        if hallucination_risk > 0.3:
-            score = 0.75
-            confidence = 0.7
-        elif (
-            citation_analysis.get("citation_format_score", 0.5) < 0.5
-            and len(citations) > 3
-        ):
-            score = 0.6
-            confidence = 0.6
-        elif claims.get("hedging_ratio", 0) < 0.02 and len(text) > 500:
-            score = 0.55
-            confidence = 0.5
+        calibrated = self._get_calibrated_score(text)
+        if calibrated is not None:
+            score, confidence = calibrated
         else:
-            score = 0.35
-            confidence = 0.5
+            hallucination_risk = citation_analysis.get("potential_hallucinations", 0)
+            if hallucination_risk > 0.3:
+                score = 0.75
+                confidence = 0.7
+            elif (
+                citation_analysis.get("citation_format_score", 0.5) < 0.5
+                and len(citations) > 3
+            ):
+                score = 0.6
+                confidence = 0.6
+            elif claims.get("hedging_ratio", 0) < 0.02 and len(text) > 500:
+                score = 0.55
+                confidence = 0.5
+            else:
+                score = 0.35
+                confidence = 0.5
 
         return DetectorResult(
             score=score,
@@ -167,6 +191,7 @@ class AcademicDetector(BaseDetector):
             metadata={
                 "citations_found": len(citations),
                 **features,
+                "calibrated": calibrated is not None,
             },
         )
 

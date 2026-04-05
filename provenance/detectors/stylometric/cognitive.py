@@ -9,9 +9,10 @@ from collections import Counter
 import spacy
 
 from provenance.core.base import BaseDetector, DetectorResult
+from provenance.core.calibration import CalibratedDetectorMixin
 
 
-class CognitiveDetector(BaseDetector):
+class CognitiveDetector(CalibratedDetectorMixin, BaseDetector):
     """Detect AI text using cognitive signatures.
 
     Analyzes structural logic patterns that persist after vocabulary swaps:
@@ -50,12 +51,28 @@ class CognitiveDetector(BaseDetector):
 
     def _extract_transition_patterns(self, text: str) -> dict[str, float]:
         transition_words = {
-            "furthermore", "moreover", "additionally", "however",
-            "therefore", "thus", "consequently", "nevertheless",
-            "meanwhile", "similarly", "conversely", "specifically",
-            "in conclusion", "finally", "lastly", "in contrast",
-            "on the other hand", "for example", "for instance",
-            "in addition", "as a result", "accordingly",
+            "furthermore",
+            "moreover",
+            "additionally",
+            "however",
+            "therefore",
+            "thus",
+            "consequently",
+            "nevertheless",
+            "meanwhile",
+            "similarly",
+            "conversely",
+            "specifically",
+            "in conclusion",
+            "finally",
+            "lastly",
+            "in contrast",
+            "on the other hand",
+            "for example",
+            "for instance",
+            "in addition",
+            "as a result",
+            "accordingly",
         }
 
         text_lower = text.lower()
@@ -99,7 +116,8 @@ class CognitiveDetector(BaseDetector):
         clause_counts = []
         for sent in sentences:
             n_clauses = sum(
-                1 for token in sent
+                1
+                for token in sent
                 if token.dep_ in {"advcl", "acl", "ccomp", "xcomp", "relcl"}
             )
             clause_counts.append(n_clauses + 1)
@@ -144,10 +162,22 @@ class CognitiveDetector(BaseDetector):
         ttr = len(unique_words) / len(words)
 
         advanced_words = {
-            "furthermore", "moreover", "consequently", "nevertheless",
-            "nonetheless", "accordingly", "subsequently", "predominantly",
-            "predominant", "substantial", "significant", "comprehensive",
-            "fundamental", "inherent", "intrinsic", "paradigm",
+            "furthermore",
+            "moreover",
+            "consequently",
+            "nevertheless",
+            "nonetheless",
+            "accordingly",
+            "subsequently",
+            "predominantly",
+            "predominant",
+            "substantial",
+            "significant",
+            "comprehensive",
+            "fundamental",
+            "inherent",
+            "intrinsic",
+            "paradigm",
         }
         advanced_count = sum(1 for w in words if w in advanced_words)
         advanced_ratio = advanced_count / len(words)
@@ -156,6 +186,35 @@ class CognitiveDetector(BaseDetector):
             "ttr": ttr,
             "advanced_word_ratio": advanced_ratio,
         }
+
+    def _extract_features(self, text: str) -> list[float]:
+        para_features = self._extract_paragraph_structure(text)
+        trans_features = self._extract_transition_patterns(text)
+        flow_features = self._extract_argument_flow(text)
+        struct_features = self._extract_structural_perfection(text)
+        vocab_features = self._extract_vocabulary_richness(text)
+        all_features = {
+            **para_features,
+            **trans_features,
+            **flow_features,
+            **struct_features,
+            **vocab_features,
+        }
+        return [all_features.get(k, 0.0) for k in self._extract_feature_names()]
+
+    def _extract_feature_names(self) -> list[str]:
+        return [
+            "paragraph_count",
+            "paragraph_length_cv",
+            "transition_density",
+            "transition_uniformity",
+            "clause_complexity",
+            "sentence_depth_cv",
+            "structure_regularity",
+            "pattern_repetition",
+            "ttr",
+            "advanced_word_ratio",
+        ]
 
     def detect(self, text: str) -> DetectorResult:
         if len(text.split()) < 20:
@@ -171,46 +230,53 @@ class CognitiveDetector(BaseDetector):
         struct_features = self._extract_structural_perfection(text)
         vocab_features = self._extract_vocabulary_richness(text)
 
-        all_features = {**para_features, **trans_features, **flow_features, **struct_features, **vocab_features}
+        all_features = {
+            **para_features,
+            **trans_features,
+            **flow_features,
+            **struct_features,
+            **vocab_features,
+        }
 
-        ai_score = 0.0
-        n_signals = 0
-
-        if para_features.get("paragraph_length_cv", 1) < 0.3:
-            ai_score += 0.2
-            n_signals += 1
-
-        if trans_features.get("transition_uniformity", 0) > 0.6:
-            ai_score += 0.15
-            n_signals += 1
-
-        if flow_features.get("sentence_depth_cv", 1) < 0.3:
-            ai_score += 0.15
-            n_signals += 1
-
-        if struct_features.get("structure_regularity", 0) > 0.7:
-            ai_score += 0.2
-            n_signals += 1
-
-        if struct_features.get("pattern_repetition", 0) > 0.3:
-            ai_score += 0.1
-            n_signals += 1
-
-        if vocab_features.get("advanced_word_ratio", 0) > 0.02:
-            ai_score += 0.1
-            n_signals += 1
-
-        if n_signals > 0:
-            score = min(1.0, ai_score)
+        calibrated = self._get_calibrated_score(text)
+        if calibrated is not None:
+            score, confidence = calibrated
         else:
-            score = 0.5
+            ai_score = 0.0
+            n_signals = 0
 
-        confidence = min(0.9, 0.4 + 0.1 * n_signals)
+            if para_features.get("paragraph_length_cv", 1) < 0.3:
+                ai_score += 0.2
+                n_signals += 1
+
+            if trans_features.get("transition_uniformity", 0) > 0.6:
+                ai_score += 0.15
+                n_signals += 1
+
+            if flow_features.get("sentence_depth_cv", 1) < 0.3:
+                ai_score += 0.15
+                n_signals += 1
+
+            if struct_features.get("structure_regularity", 0) > 0.7:
+                ai_score += 0.2
+                n_signals += 1
+
+            if struct_features.get("pattern_repetition", 0) > 0.3:
+                ai_score += 0.1
+                n_signals += 1
+
+            if vocab_features.get("advanced_word_ratio", 0) > 0.02:
+                ai_score += 0.1
+                n_signals += 1
+
+            score = min(1.0, ai_score) if n_signals > 0 else 0.5
+
+            confidence = min(0.9, 0.4 + 0.1 * n_signals)
 
         return DetectorResult(
             score=score,
             confidence=confidence,
-            metadata=all_features,
+            metadata={**all_features, "calibrated": calibrated is not None},
         )
 
 

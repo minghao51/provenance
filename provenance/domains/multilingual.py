@@ -6,15 +6,16 @@ import re
 from collections import Counter
 
 from provenance.core.base import BaseDetector, DetectorResult
+from provenance.core.calibration import CalibratedDetectorMixin
 
 try:
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
 except ImportError:
-    AutoModelForSequenceClassification = None
-    AutoTokenizer = None
+    AutoModelForSequenceClassification = None  # type: ignore[assignment,misc]
+    AutoTokenizer = None  # type: ignore[assignment,misc]
 
 
-class MultilingualDetector(BaseDetector):
+class MultilingualDetector(CalibratedDetectorMixin, BaseDetector):
     name = "multilingual_detector"
     latency_tier = "slow"
     domains = ["multilingual"]
@@ -133,6 +134,33 @@ class MultilingualDetector(BaseDetector):
         std = variance**0.5
         return float(std / mean_len) if mean_len > 0 else 0.0
 
+    def _extract_features(self, text: str) -> list[float]:
+        lang, lang_prob = self._detect_language(text)
+        family = self._get_language_family(lang)
+        features = self._compute_cross_lingual_features(text)
+        burstiness_cv = self._estimate_burstiness_adapted(text, family)
+        threshold = self.BURSTINESS_THRESHOLDS.get(family, 0.35)
+        return [
+            burstiness_cv,
+            threshold,
+            features.get("char_bigram_diversity", 0.0),
+            features.get("avg_word_length", 0.0),
+            features.get("word_length_variance", 0.0),
+            features.get("sentence_length_variance", 0.0),
+            lang_prob,
+        ]
+
+    def _extract_feature_names(self) -> list[str]:
+        return [
+            "burstiness_cv",
+            "family_threshold",
+            "char_bigram_diversity",
+            "avg_word_length",
+            "word_length_variance",
+            "sentence_length_variance",
+            "language_probability",
+        ]
+
     def detect(self, text: str) -> DetectorResult:
         if len(text) < 50:
             return DetectorResult(
@@ -148,18 +176,22 @@ class MultilingualDetector(BaseDetector):
 
         threshold = self.BURSTINESS_THRESHOLDS.get(family, 0.35)
 
-        if burstiness_cv < threshold * 0.5:
-            score = 0.8
-            confidence = 0.7
-        elif burstiness_cv < threshold:
-            score = 0.6
-            confidence = 0.6
-        elif features.get("char_bigram_diversity", 1) < 0.3:
-            score = 0.55
-            confidence = 0.5
+        calibrated = self._get_calibrated_score(text)
+        if calibrated is not None:
+            score, confidence = calibrated
         else:
-            score = 0.35
-            confidence = 0.5
+            if burstiness_cv < threshold * 0.5:
+                score = 0.8
+                confidence = 0.7
+            elif burstiness_cv < threshold:
+                score = 0.6
+                confidence = 0.6
+            elif features.get("char_bigram_diversity", 1) < 0.3:
+                score = 0.55
+                confidence = 0.5
+            else:
+                score = 0.35
+                confidence = 0.5
 
         return DetectorResult(
             score=score,
@@ -170,6 +202,7 @@ class MultilingualDetector(BaseDetector):
                 "language_family": family,
                 "burstiness_cv": burstiness_cv,
                 **features,
+                "calibrated": calibrated is not None,
             },
         )
 

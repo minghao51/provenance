@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import pickle
 from pathlib import Path
+
+import joblib
 
 from provenance.core.base import BaseDetector, DetectorResult
 
@@ -65,8 +66,7 @@ class LightGBMDetector(BaseDetector):
         if self.feature_extractor is None:
             self.feature_extractor = FeatureExtractor()
 
-        with open(model_path, "rb") as f:
-            model_data = pickle.load(f)
+        model_data = joblib.load(model_path)
 
         self.model = model_data["model"]
         self.explainer = shap.Explainer(self.model)
@@ -79,8 +79,7 @@ class LightGBMDetector(BaseDetector):
             "model": self.model,
             "feature_names": self.feature_names,
         }
-        with open(model_path, "wb") as f:
-            pickle.dump(model_data, f)
+        joblib.dump(model_data, model_path)
 
     def detect(self, text: str) -> DetectorResult:
         if self.model is None or self.feature_extractor is None:

@@ -3,19 +3,21 @@
 from __future__ import annotations
 
 import random
+from typing import cast
 
 from provenance.core.base import BaseDetector, DetectorResult
+from provenance.core.calibration import CalibratedDetectorMixin
 
 try:
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 except ImportError:
-    torch = None
-    AutoModelForCausalLM = None
-    AutoTokenizer = None
+    torch = None  # type: ignore[assignment,misc]
+    AutoModelForCausalLM = None  # type: ignore[assignment,misc]
+    AutoTokenizer = None  # type: ignore[assignment,misc]
 
 
-class CurvatureDetector(BaseDetector):
+class CurvatureDetector(CalibratedDetectorMixin, BaseDetector):
     """DetectGPT-style detector using probability curvature.
 
     Measures how the log-probability of text changes under perturbations.
@@ -36,7 +38,9 @@ class CurvatureDetector(BaseDetector):
         seed: int = 42,
     ):
         if torch is None:
-            raise ImportError("torch and transformers are required for CurvatureDetector")
+            raise ImportError(
+                "torch and transformers are required for CurvatureDetector"
+            )
 
         self.model_name = model_name
         self.n_perturbations = n_perturbations
@@ -48,15 +52,27 @@ class CurvatureDetector(BaseDetector):
         else:
             self.device = device
 
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForCausalLM.from_pretrained(model_name)
-        self.model.to(self.device)
-        self.model.eval()
+        self._tokenizer = None
+        self._model = None
+
+    @property
+    def tokenizer(self):
+        if self._tokenizer is None:
+            self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        return self._tokenizer
+
+    @property
+    def model(self):
+        if self._model is None:
+            self._model = AutoModelForCausalLM.from_pretrained(self.model_name)
+            self._model.to(self.device)
+            self._model.eval()
+        return self._model
 
     def _compute_log_prob(self, input_ids: torch.Tensor) -> float:
         with torch.no_grad():
             outputs = self.model(input_ids, labels=input_ids)
-            return -outputs.loss.item()
+            return cast(float, -outputs.loss.item())
 
     def _perturb_text(self, text: str) -> str:
         encodings = self.tokenizer(
@@ -84,10 +100,71 @@ class CurvatureDetector(BaseDetector):
             top_k = min(50, token_probs.size(0))
             top_probs, top_indices = torch.topk(token_probs, top_k)
             top_probs = top_probs / top_probs.sum()
-            sampled_idx = torch.multinomial(top_probs, 1).item()
+            sampled_idx = cast(int, torch.multinomial(top_probs, 1).item())
             perturbed_ids[0, idx] = top_indices[sampled_idx]
 
-        return self.tokenizer.decode(perturbed_ids[0], skip_special_tokens=True)
+        return cast(
+            str, self.tokenizer.decode(perturbed_ids[0], skip_special_tokens=True)
+        )
+
+    def _extract_features(self, text: str) -> list[float]:
+        encodings = self.tokenizer(
+            text,
+            return_tensors="pt",
+            truncation=True,
+            max_length=512,
+            add_special_tokens=True,
+        )
+        input_ids = encodings["input_ids"].to(self.device)
+
+        if input_ids.size(1) <= 2:
+            return [0.0, 0.0, 0.0, 0.0, 0.0]
+
+        original_log_prob = self._compute_log_prob(input_ids)
+
+        perturbed_log_probs = []
+        for _ in range(self.n_perturbations):
+            perturbed_text = self._perturb_text(text)
+            if not perturbed_text.strip():
+                continue
+
+            perturbed_enc = self.tokenizer(
+                perturbed_text,
+                return_tensors="pt",
+                truncation=True,
+                max_length=512,
+                add_special_tokens=True,
+            )
+            perturbed_ids = perturbed_enc["input_ids"].to(self.device)
+            log_prob = self._compute_log_prob(perturbed_ids)
+            perturbed_log_probs.append(log_prob)
+
+        if not perturbed_log_probs:
+            return [0.0, 0.0, 0.0, 0.0, 0.0]
+
+        mean_perturbed = sum(perturbed_log_probs) / len(perturbed_log_probs)
+        curvature = original_log_prob - mean_perturbed
+        variance = sum((p - mean_perturbed) ** 2 for p in perturbed_log_probs) / len(
+            perturbed_log_probs
+        )
+        std_perturbed = variance**0.5
+
+        return [
+            curvature,
+            original_log_prob,
+            mean_perturbed,
+            std_perturbed,
+            abs(curvature),
+        ]
+
+    def _extract_feature_names(self) -> list[str]:
+        return [
+            "curvature",
+            "original_log_prob",
+            "mean_perturbed_log_prob",
+            "std_perturbed_log_prob",
+            "abs_curvature",
+        ]
 
     def detect(self, text: str) -> DetectorResult:
         encodings = self.tokenizer(
@@ -135,28 +212,32 @@ class CurvatureDetector(BaseDetector):
         mean_perturbed = sum(perturbed_log_probs) / len(perturbed_log_probs)
         curvature = original_log_prob - mean_perturbed
 
-        variance = sum(
-            (p - mean_perturbed) ** 2 for p in perturbed_log_probs
-        ) / len(perturbed_log_probs)
+        variance = sum((p - mean_perturbed) ** 2 for p in perturbed_log_probs) / len(
+            perturbed_log_probs
+        )
         std_perturbed = variance**0.5
 
-        abs_curvature = abs(curvature)
-
-        if abs_curvature < 0.05:
-            score = 0.5
-            confidence = 0.3
-        elif abs_curvature < 0.15:
-            score = 0.55 if curvature > 0 else 0.45
-            confidence = 0.5
-        elif abs_curvature < 0.3:
-            score = 0.65 if curvature > 0 else 0.35
-            confidence = 0.6
-        elif abs_curvature < 0.5:
-            score = 0.75 if curvature > 0 else 0.25
-            confidence = 0.7
+        calibrated = self._get_calibrated_score(text)
+        if calibrated is not None:
+            score, confidence = calibrated
         else:
-            score = 0.85 if curvature > 0 else 0.15
-            confidence = 0.8
+            abs_curvature = abs(curvature)
+
+            if abs_curvature < 0.05:
+                score = 0.5
+                confidence = 0.3
+            elif abs_curvature < 0.15:
+                score = 0.55 if curvature > 0 else 0.45
+                confidence = 0.5
+            elif abs_curvature < 0.3:
+                score = 0.65 if curvature > 0 else 0.35
+                confidence = 0.6
+            elif abs_curvature < 0.5:
+                score = 0.75 if curvature > 0 else 0.25
+                confidence = 0.7
+            else:
+                score = 0.85 if curvature > 0 else 0.15
+                confidence = 0.8
 
         return DetectorResult(
             score=score,
@@ -167,6 +248,7 @@ class CurvatureDetector(BaseDetector):
                 "mean_perturbed_log_prob": mean_perturbed,
                 "std_perturbed_log_prob": std_perturbed,
                 "n_perturbations": len(perturbed_log_probs),
+                "calibrated": calibrated is not None,
             },
         )
 

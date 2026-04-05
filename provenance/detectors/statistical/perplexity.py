@@ -31,7 +31,7 @@ class PerplexityDetector(BaseDetector):
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModelForCausalLM.from_pretrained(model_name)
-        self.model.to(self.device)
+        self.model.to(self.device)  # type: ignore[arg-type]
         self.model.eval()
 
     def _compute_windowed_ppl(self, text: str) -> list[float]:
@@ -109,7 +109,7 @@ class PerplexityDetectorNeo(PerplexityDetector):
     """Perplexity-based detector using GPT-Neo for better modern AI detection."""
 
     name = "perplexity_gptneo"
-    latency_tier = "slow"
+    latency_tier = "slow"  # type: ignore[assignment]
     domains = ["prose", "academic"]
 
     def __init__(

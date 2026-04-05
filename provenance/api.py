@@ -63,9 +63,13 @@ def _get_provenance(
 ) -> Provenance:
     global _provenance_cache
 
-    if detectors is None and ensemble_strategy == "weighted_average" and domain is None:
-        if _provenance_cache is not None:
-            return _provenance_cache
+    if (
+        detectors is None
+        and ensemble_strategy == "weighted_average"
+        and domain is None
+        and _provenance_cache is not None
+    ):
+        return _provenance_cache
 
     return Provenance(
         detectors=detectors,

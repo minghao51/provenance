@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
 
 import torch
@@ -41,12 +40,9 @@ def load_raid_dataset(
             labels.append(int(label))
 
     if sample_limit and len(texts) > sample_limit:
-        texts, labels = zip(
-            *list(zip(texts, labels, strict=False))[:sample_limit],
-            strict=False,
-        )
-        texts = list(texts)
-        labels = list(labels)
+        paired = list(zip(texts, labels, strict=False))[:sample_limit]
+        texts = [t for t, _ in paired]
+        labels = [label for _, label in paired]
 
     return texts, labels
 
@@ -71,16 +67,12 @@ def train_raid_detector(
     print(f"Train: {len(train_texts)}, Val: {len(val_texts)}")
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForSequenceClassification.from_pretrained(
-        model_name, num_labels=2
-    )
+    model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2)
 
     train_encodings = tokenizer(
         train_texts, truncation=True, padding=True, max_length=512
     )
-    val_encodings = tokenizer(
-        val_texts, truncation=True, padding=True, max_length=512
-    )
+    val_encodings = tokenizer(val_texts, truncation=True, padding=True, max_length=512)
 
     train_dataset = Dataset.from_dict(
         {
@@ -107,7 +99,7 @@ def train_raid_detector(
         per_device_eval_batch_size=batch_size,
         learning_rate=learning_rate,
         weight_decay=0.01,
-        evaluation_strategy="epoch",
+        eval_strategy="epoch",
         save_strategy="epoch",
         save_total_limit=2,
         load_best_model_at_end=True,
@@ -147,7 +139,9 @@ def train_raid_detector(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fine-tune RoBERTa on RAID dataset")
     parser.add_argument("--model", default="roberta-base", help="Base model name")
-    parser.add_argument("--output", default="models/raid_roberta", help="Output directory")
+    parser.add_argument(
+        "--output", default="models/raid_roberta", help="Output directory"
+    )
     parser.add_argument("--sample-limit", type=int, default=None, help="Limit samples")
     parser.add_argument("--epochs", type=int, default=3, help="Training epochs")
     parser.add_argument("--batch-size", type=int, default=16, help="Batch size")

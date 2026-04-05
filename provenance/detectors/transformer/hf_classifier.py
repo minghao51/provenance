@@ -8,10 +8,10 @@ try:
     import torch
     from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
 except ImportError:
-    AutoModelForSequenceClassification = None
-    AutoTokenizer = None
-    pipeline = None
-    torch = None
+    AutoModelForSequenceClassification = None  # type: ignore[assignment,misc]
+    AutoTokenizer = None  # type: ignore[assignment,misc]
+    pipeline = None  # type: ignore[assignment,misc]
+    torch = None  # type: ignore[assignment,misc]
 
 try:
     from captum.attr import IntegratedGradients
@@ -44,6 +44,9 @@ class HuggingFaceClassifierDetector(BaseDetector):
             raise ImportError(
                 "transformers is required for HuggingFaceClassifierDetector"
             )
+        assert AutoModelForSequenceClassification is not None
+        assert AutoTokenizer is not None
+        assert pipeline is not None
 
         self.model_id = model_id or self.MODEL_REGISTRY["chatgpt_detector"]
 

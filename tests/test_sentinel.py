@@ -37,6 +37,9 @@ class TestProvenance:
         provenance = Provenance(weights={"det1": 0.5, "det2": 0.5})
         assert provenance.ensemble.config.weights == {"det1": 0.5, "det2": 0.5}
 
+    def test_provenance_min_text_length_constant_preserved(self):
+        assert Provenance.MIN_TEXT_LENGTH == 150
+
     def test_provenance_detect_short_text(self):
         provenance = Provenance(detectors=[])
         result = provenance.detect("Short text.")
