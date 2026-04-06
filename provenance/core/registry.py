@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import importlib
 import importlib.metadata
+import logging
 import os
 import threading
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from .base import BaseDetector
+
+logger = logging.getLogger(__name__)
 
 _registry_lock = threading.Lock()
 
@@ -70,10 +73,18 @@ class DetectorRegistry:
                     module = importlib.import_module(ep.module)
                     if hasattr(module, "register"):
                         module.register(self)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except ImportError as e:
+                    logger.debug(f"Failed to import entry point {ep.name}: {e}")
+                except AttributeError as e:
+                    logger.debug(
+                        f"Entry point {ep.name} missing register function: {e}"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Unexpected error loading entry point {ep.name}: {e}"
+                    )
+        except (ImportError, OSError) as e:
+            logger.debug(f"Failed to load entry points: {e}")
         with _registry_lock:
             self._entry_points_loaded = True
 

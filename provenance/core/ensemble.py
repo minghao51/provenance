@@ -40,7 +40,7 @@ class Ensemble:
             return 0.5
 
         if not weights:
-            return sum(r.score for r in detector_scores.values()) / len(detector_scores)
+            return self._compute_average_score(detector_scores)
 
         total_weight = sum(weights.get(name, 1.0) for name in detector_scores)
         weighted_sum = sum(
@@ -49,9 +49,17 @@ class Ensemble:
         )
         return weighted_sum / total_weight
 
+    def _compute_average_score(
+        self, detector_scores: dict[str, DetectorResult]
+    ) -> float:
+        """Compute average score across all detector results."""
+        if not detector_scores:
+            return 0.5
+        return sum(r.score for r in detector_scores.values()) / len(detector_scores)
+
     def _compute_stacking(self, detector_scores: dict[str, DetectorResult]) -> float:
         if self._stacker is None:
-            return sum(r.score for r in detector_scores.values()) / len(detector_scores)
+            return self._compute_average_score(detector_scores)
 
         features = [
             detector_scores[name].score
@@ -59,14 +67,14 @@ class Ensemble:
             if name in detector_scores
         ]
         if len(features) != len(self._feature_names):
-            return sum(r.score for r in detector_scores.values()) / len(detector_scores)
+            return self._compute_average_score(detector_scores)
 
         features_arr = [[f] for f in features]
         try:
             calibrated = self._stacker.predict_proba(features_arr)[0][1]
             return float(calibrated)
         except Exception:
-            return sum(r.score for r in detector_scores.values()) / len(detector_scores)
+            return self._compute_average_score(detector_scores)
 
     def _compute_uncertainty_aware_vote(
         self, detector_scores: dict[str, DetectorResult]
@@ -109,6 +117,16 @@ class Ensemble:
         if confidence < 0.5:
             return "uncertain"
         return "mixed"
+
+    def _compute_average_confidence(
+        self, detector_scores: dict[str, DetectorResult]
+    ) -> float:
+        """Compute average confidence across all detector results."""
+        if not detector_scores:
+            return 0.0
+        return sum(r.confidence for r in detector_scores.values()) / len(
+            detector_scores
+        )
 
     def _collect_heatmap(self, detector_scores: dict[str, DetectorResult]) -> list:
         from provenance.core.base import TokenScore
@@ -181,23 +199,15 @@ class Ensemble:
 
         if self.config.strategy == "weighted_average":
             score = self._compute_weighted_average(detector_scores)
-            confidence = sum(r.confidence for r in detector_scores.values()) / len(
-                detector_scores
-            )
+            confidence = self._compute_average_confidence(detector_scores)
         elif self.config.strategy == "stacking":
             score = self._compute_stacking(detector_scores)
-            confidence = sum(r.confidence for r in detector_scores.values()) / len(
-                detector_scores
-            )
+            confidence = self._compute_average_confidence(detector_scores)
         elif self.config.strategy == "uncertainty_aware":
             score, confidence = self._compute_uncertainty_aware_vote(detector_scores)
         else:
-            score = sum(r.score for r in detector_scores.values()) / len(
-                detector_scores
-            )
-            confidence = sum(r.confidence for r in detector_scores.values()) / len(
-                detector_scores
-            )
+            score = self._compute_average_score(detector_scores)
+            confidence = self._compute_average_confidence(detector_scores)
 
         label = self._determine_label(score, confidence)
 

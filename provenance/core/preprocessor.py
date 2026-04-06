@@ -120,3 +120,14 @@ class Preprocessor:
 
     def preprocess_iter(self, text: str) -> Iterator[TextChunk]:
         yield from self.chunk_text(text)
+
+    def tokenize_words(self, text: str) -> list[str]:
+        """Extract words from text, lowercase them.
+
+        Args:
+            text: Input text.
+
+        Returns:
+            List of lowercase words.
+        """
+        return re.findall(r"\b[a-zA-Z]+\b", text.lower())

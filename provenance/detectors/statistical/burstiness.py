@@ -9,6 +9,8 @@ if TYPE_CHECKING:
 
 from provenance.core.base import BaseDetector, DetectorResult
 from provenance.core.calibration import CalibratedDetectorMixin
+from provenance.core.preprocessor import Preprocessor
+from provenance.core.statistics import compute_cv, compute_mean_variance_std
 
 
 class BurstinessDetector(CalibratedDetectorMixin, BaseDetector):
@@ -33,10 +35,10 @@ class BurstinessDetector(CalibratedDetectorMixin, BaseDetector):
         else:
             self.perplexity_detector = perplexity_detector
 
-    def _compute_sentence_scores(self, text: str) -> list[float]:
-        import re
+        self.preprocessor = Preprocessor()
 
-        sentences = re.split(r"(?<=[.!?])\s+", text)
+    def _compute_sentence_scores(self, text: str) -> list[float]:
+        sentences = self.preprocessor.split_sentences(text)
         sentences = [s.strip() for s in sentences if len(s.strip()) > 15]
 
         if len(sentences) < 2:
@@ -54,12 +56,8 @@ class BurstinessDetector(CalibratedDetectorMixin, BaseDetector):
         if len(sentence_scores) < 2:
             return [0.0, 0.0, 0.0, 0.0]
 
-        mean_score = sum(sentence_scores) / len(sentence_scores)
-        variance = sum((s - mean_score) ** 2 for s in sentence_scores) / len(
-            sentence_scores
-        )
-        std_score = variance**0.5
-        cv = std_score / mean_score if mean_score > 0 else 0.0
+        mean_score, variance, std_score = compute_mean_variance_std(sentence_scores)
+        cv = compute_cv(sentence_scores, mean_score, std_score)
         return [cv, mean_score, std_score, float(len(sentence_scores))]
 
     def _extract_feature_names(self) -> list[str]:
@@ -80,13 +78,8 @@ class BurstinessDetector(CalibratedDetectorMixin, BaseDetector):
                 metadata={"error": "Not enough sentences to compute burstiness"},
             )
 
-        mean_score = sum(sentence_scores) / len(sentence_scores)
-        variance = sum((s - mean_score) ** 2 for s in sentence_scores) / len(
-            sentence_scores
-        )
-        std_score = variance**0.5
-
-        cv = std_score / mean_score if mean_score > 0 else 0.0
+        mean_score, variance, std_score = compute_mean_variance_std(sentence_scores)
+        cv = compute_cv(sentence_scores, mean_score, std_score)
 
         calibrated = self._get_calibrated_score(text)
         if calibrated is not None:

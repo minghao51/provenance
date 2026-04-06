@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import math
-import re
 from collections import Counter
 from functools import lru_cache
 
 from provenance.core.base import BaseDetector, DetectorResult
 from provenance.core.calibration import CalibratedDetectorMixin
+from provenance.core.preprocessor import Preprocessor
+
+logger = logging.getLogger(__name__)
 
 try:
     import nltk
@@ -30,6 +33,7 @@ class EntropyDetector(CalibratedDetectorMixin, BaseDetector):
 
     def __init__(self):
         self.word_frequencies: Counter[str] | None = None
+        self.preprocessor = Preprocessor()
         self._load_brown_frequencies()
 
     def _load_brown_frequencies(self) -> None:
@@ -39,15 +43,21 @@ class EntropyDetector(CalibratedDetectorMixin, BaseDetector):
             words = brown.words()
             self.word_frequencies = Counter(w.lower() for w in words if w.isalpha())
         except LookupError:
-            nltk.download("brown", quiet=True)
-            from nltk.corpus import brown as brown_corpus
+            try:
+                nltk.download("brown", quiet=True)
+                from nltk.corpus import brown as brown_corpus
 
-            words = brown_corpus.words()
-            self.word_frequencies = Counter(w.lower() for w in words if w.isalpha())
+                words = brown_corpus.words()
+                self.word_frequencies = Counter(w.lower() for w in words if w.isalpha())
+            except Exception as e:
+                logger.warning(
+                    f"Failed to load Brown corpus after download attempt: {e}"
+                )
+                self.word_frequencies = None
 
     @lru_cache(maxsize=256)  # noqa: B019
     def _compute_unigram_entropy(self, text: str) -> float:
-        words = re.findall(r"\b[a-zA-Z]+\b", text.lower())
+        words = self.preprocessor.tokenize_words(text)
         if not words:
             return 0.0
 
@@ -64,7 +74,7 @@ class EntropyDetector(CalibratedDetectorMixin, BaseDetector):
 
     @lru_cache(maxsize=256)  # noqa: B019
     def _compute_kl_divergence(self, text: str) -> float:
-        words = re.findall(r"\b[a-zA-Z]+\b", text.lower())
+        words = self.preprocessor.tokenize_words(text)
         if not words or not self.word_frequencies:
             return 0.0
 
@@ -121,7 +131,7 @@ class EntropyDetector(CalibratedDetectorMixin, BaseDetector):
             metadata={
                 "text_entropy": text_entropy,
                 "kl_divergence": kl_div,
-                "vocabulary_size": len(set(re.findall(r"\b[a-zA-Z]+\b", text.lower()))),
+                "vocabulary_size": len(set(self.preprocessor.tokenize_words(text))),
                 "calibrated": calibrated is not None,
             },
         )

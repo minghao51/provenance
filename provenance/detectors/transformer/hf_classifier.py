@@ -7,11 +7,17 @@ from provenance.core.base import BaseDetector, DetectorResult, TokenScore
 try:
     import torch
     from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
+
+    from provenance.core.pytorch_utils import get_torch_device
 except ImportError:
     AutoModelForSequenceClassification = None  # type: ignore[assignment,misc]
     AutoTokenizer = None  # type: ignore[assignment,misc]
     pipeline = None  # type: ignore[assignment,misc]
     torch = None  # type: ignore[assignment,misc]
+
+    def get_torch_device(device: str = "auto") -> str:  # type: ignore[no-redef]
+        return "cpu"
+
 
 try:
     from captum.attr import IntegratedGradients
@@ -49,31 +55,7 @@ class HuggingFaceClassifierDetector(BaseDetector):
         assert pipeline is not None
 
         self.model_id = model_id or self.MODEL_REGISTRY["chatgpt_detector"]
-
-        if device == "auto":
-            self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        else:
-            self.device = device
-
-        self.truncation = truncation
-        self.max_length = max_length
-
-        self.classifier = pipeline(
-            "text-classification",
-            model=self.model_id,
-            device=0 if self.device == "cuda" else -1,
-            truncation=truncation,
-            max_length=max_length,
-        )
-        self.model = self.classifier.model
-        self.tokenizer = self.classifier.tokenizer
-
-        self.model_id = model_id or self.MODEL_REGISTRY["chatgpt_detector"]
-
-        if device == "auto":
-            self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        else:
-            self.device = device
+        self.device = get_torch_device(device)
 
         self.truncation = truncation
         self.max_length = max_length
