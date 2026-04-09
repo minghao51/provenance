@@ -106,7 +106,9 @@ result = evaluator.evaluate_detector(
 
 print(f"AUROC: {result.auroc:.4f}")
 print(f"F1: {result.f1:.4f}")
-print(f"FPR@10TPR: {result.fpr_at_10tpr:.4f}")
+print(f"TPR@1%FPR: {result.tpr_at_1fpr:.4f}")
+print(f"TPR@5%FPR: {result.tpr_at_5fpr:.4f}")
+print(f"FPR@10%TPR: {result.fpr_at_10tpr:.4f}")
 ```
 
 ### Compare Multiple Detectors
@@ -144,7 +146,9 @@ runner.generate_report(suite, output_format='all')
 |--------|-------------|---------|--------|------|
 | **AUROC** | Area Under ROC Curve | 1.0 | 0.5 | >0.80 |
 | **F1** | Harmonic mean precision/recall | 1.0 | varies | >0.70 |
-| **FPR@10TPR** | False Positive Rate at 90% recall | 0.0 | ~0.9 | <0.10 |
+| **TPR@1%FPR** | Recall when only 1% of human text may be falsely flagged | 1.0 | often near 0.0 | higher is better |
+| **TPR@5%FPR** | Recall when only 5% of human text may be falsely flagged | 1.0 | often low | higher is better |
+| **FPR@10%TPR** | False Positive Rate at 90% recall | 0.0 | ~0.9 | <0.10 |
 | **Precision** | Of texts labeled AI, how many truly are | 1.0 | varies | >0.80 |
 | **Recall** | Of actual AI, how many caught | 1.0 | varies | >0.80 |
 
@@ -152,23 +156,31 @@ runner.generate_report(suite, output_format='all')
 
 - **AUROC** (0.0-1.0): Threshold-independent measure of separation ability. 1.0 = perfect, 0.5 = random guessing.
 
-- **FPR@10TPR**: Critical for bias auditing. At 90% recall (catching 90% of AI text), what % of human text is falsely flagged? Lower is better.
+- **TPR@1%FPR / TPR@5%FPR**: Practical deployment metrics. They answer: if we cap false accusations against human text at 1% or 5%, how much AI text do we still catch? Higher is better.
+
+- **FPR@10%TPR**: Stress metric for aggressive operating points. At 90% recall (catching 90% of AI text), what % of human text is falsely flagged? Lower is better.
 
 - **Precision vs Recall Trade-off**: 
   - High precision = fewer false accusations of human text
   - High recall = fewer missed AI texts
   - F1 balances both
 
+### Why Low-FPR Metrics Matter
+
+The detector literature is increasingly clear that AUROC and headline F1 can look strong while deployment-relevant operating points collapse. In particular, the NAACL 2025 practical evaluation cited in [20260409-detection-landscape-findings](./20260409-detection-landscape-findings.md) reports settings where `TPR@1%FPR` falls to 0 on unseen models and prompt attacks. That means a detector can look healthy in aggregate while still failing once the false-positive budget is constrained to something a real product or moderation workflow could tolerate.
+
+For Provenance, that makes `TPR@1%FPR` and `TPR@5%FPR` first-class comparison metrics alongside AUROC and F1. Use them to separate detectors that merely rank examples well from detectors that remain usable when false accusations must stay rare.
+
 ### Example Results
 
 ```
 === RAID Dataset (50 samples) ===
-PerplexityDetector:   AUROC=0.9754  F1=0.7733  FPR@10TPR=0.0476
-ChatGPTDetector:       AUROC=1.0000  F1=0.8163  FPR@10TPR=0.0000
+PerplexityDetector:   AUROC=0.9754  F1=0.7733  TPR@1%FPR=0.7931  TPR@5%FPR=0.9310  FPR@10%TPR=0.0476
+ChatGPTDetector:      AUROC=1.0000  F1=0.8163  TPR@1%FPR=0.9655  TPR@5%FPR=1.0000  FPR@10%TPR=0.0000
 
 === MAGE Dataset (AI-edited, 50 samples) ===
-PerplexityDetector:   AUROC=0.4057  F1=0.7532  FPR@10TPR=1.0000
-ChatGPTDetector:       AUROC=0.5395  F1=0.4528  FPR@10TPR=0.7500
+PerplexityDetector:   AUROC=0.4057  F1=0.7532  TPR@1%FPR=0.0000  TPR@5%FPR=0.0690  FPR@10%TPR=1.0000
+ChatGPTDetector:      AUROC=0.5395  F1=0.4528  TPR@1%FPR=0.0345  TPR@5%FPR=0.1034  FPR@10%TPR=0.7500
 ```
 
 **Note**: MAGE is harder because AI-edited text is partially human.

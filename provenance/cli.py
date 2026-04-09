@@ -345,7 +345,114 @@ def benchmark_compare(
     click.echo("\nSummary:")
     for r in all_results:
         click.echo(
-            f"  {r.detector_name} on {r.dataset}: AUROC={r.auroc:.4f}, F1={r.f1:.4f}"
+            f"  {r.detector_name} on {r.dataset}: "
+            f"AUROC={r.auroc:.4f}, F1={r.f1:.4f}, "
+            f"TPR@1%FPR={r.tpr_at_1fpr:.4f}, TPR@5%FPR={r.tpr_at_5fpr:.4f}"
+        )
+
+
+@main.command("benchmark-ensemble-compare")
+@click.option(
+    "--detectors",
+    "-d",
+    multiple=True,
+    required=True,
+    help="Detector names to include in the ensemble comparison",
+)
+@click.option("--dataset", "-ds", default="raid", help="Dataset to evaluate on")
+@click.option(
+    "--limit",
+    "-l",
+    type=int,
+    default=None,
+    help="Limit samples per dataset",
+)
+@click.option(
+    "--test-size",
+    type=float,
+    default=0.2,
+    show_default=True,
+    help="Held-out evaluation fraction",
+)
+@click.option(
+    "--seed",
+    type=int,
+    default=42,
+    show_default=True,
+    help="Random seed for train/test split",
+)
+@click.option(
+    "--stacker-method",
+    type=click.Choice(["platt", "isotonic"]),
+    default="platt",
+    show_default=True,
+    help="Calibration method for the learned stacker",
+)
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=True, path_type=Path),
+    help="Optional JSON/YAML config file for calibrated detector loading",
+)
+@click.option(
+    "--output-dir",
+    "-o",
+    type=click.Path(path_type=Path),
+    default=Path("benchmark_results"),
+    help="Output directory for reports",
+)
+@click.option(
+    "--format",
+    "-f",
+    type=click.Choice(["markdown", "json", "csv", "all"]),
+    default="all",
+    help="Output format",
+)
+def benchmark_ensemble_compare(
+    detectors: tuple[str, ...],
+    dataset: str,
+    limit: int | None,
+    test_size: float,
+    seed: int,
+    stacker_method: str,
+    config_path: Path | None,
+    output_dir: Path,
+    format: str,
+) -> None:
+    """Compare weighted, uncertainty-aware, and learned-stacker ensembles."""
+    from provenance.benchmarks.ensemble_workflow import benchmark_ensemble_strategies
+    from provenance.benchmarks.workflow import BenchmarkRunner, DatasetRegistry
+
+    if dataset not in DatasetRegistry.list_datasets():
+        click.echo(f"Dataset '{dataset}' not found", err=True)
+        sys.exit(1)
+
+    try:
+        suite = benchmark_ensemble_strategies(
+            detector_names=list(detectors),
+            dataset_name=dataset,
+            config=config_path,
+            sample_limit=limit,
+            test_size=test_size,
+            seed=seed,
+            stacker_method=cast(Literal["platt", "isotonic"], stacker_method),
+        )
+    except ValueError as exc:
+        click.echo(f"Benchmark setup error: {exc}", err=True)
+        sys.exit(1)
+
+    runner = BenchmarkRunner(output_dir=str(output_dir))
+    runner.generate_report(
+        suite,
+        output_format=cast(Literal["markdown", "json", "csv", "all"], format),
+    )
+
+    click.echo("\nHeld-out ensemble comparison:")
+    for result in suite.results:
+        click.echo(
+            f"  {result.detector_name}: "
+            f"AUROC={result.auroc:.4f}, F1={result.f1:.4f}, "
+            f"TPR@1%FPR={result.tpr_at_1fpr:.4f}, TPR@5%FPR={result.tpr_at_5fpr:.4f}"
         )
 
 

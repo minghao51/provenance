@@ -31,6 +31,17 @@ class Ensemble:
         self.detectors.append(detector)
         self._feature_names = [d.name for d in self.detectors]
 
+    def _build_stacking_features(
+        self, detector_scores: dict[str, DetectorResult]
+    ) -> list[float] | None:
+        features: list[float] = []
+        for name in self._feature_names:
+            if name not in detector_scores:
+                return None
+            result = detector_scores[name]
+            features.extend([float(result.score), float(result.confidence)])
+        return features
+
     def _compute_weighted_average(
         self, detector_scores: dict[str, DetectorResult]
     ) -> float:
@@ -61,17 +72,12 @@ class Ensemble:
         if self._stacker is None:
             return self._compute_average_score(detector_scores)
 
-        features = [
-            detector_scores[name].score
-            for name in self._feature_names
-            if name in detector_scores
-        ]
-        if len(features) != len(self._feature_names):
+        features = self._build_stacking_features(detector_scores)
+        if features is None:
             return self._compute_average_score(detector_scores)
 
-        features_arr = [[f] for f in features]
         try:
-            calibrated = self._stacker.predict_proba(features_arr)[0][1]
+            calibrated = self._stacker.predict_proba([features])[0][1]
             return float(calibrated)
         except Exception:
             return self._compute_average_score(detector_scores)
@@ -250,10 +256,13 @@ class Ensemble:
 
         features_list: list[list[float]] = []
         for text in texts:
-            text_features: list[float] = []
+            detector_scores: dict[str, DetectorResult] = {}
             for detector in self.detectors:
                 result = detector.detect(text)
-                text_features.append(result.score)
+                detector_scores[detector.name] = result
+            text_features = self._build_stacking_features(detector_scores)
+            if text_features is None:
+                continue
             features_list.append(text_features)
 
         if len(features_list) < 10 or len(set(labels)) < 2:
