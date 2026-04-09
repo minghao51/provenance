@@ -38,7 +38,11 @@ class DetectorRegistry:
             detector_class = self._detectors.get(name)
         if detector_class is None:
             return None
-        return detector_class()
+        try:
+            return detector_class()
+        except Exception as e:
+            logger.warning(f"Failed to initialize detector {name}: {e}")
+            return None
 
     def list_detectors(
         self,
@@ -49,7 +53,13 @@ class DetectorRegistry:
             detector_classes = list(self._detectors.values())
         results: list[BaseDetector] = []
         for detector_class in detector_classes:
-            detector = detector_class()
+            try:
+                detector = detector_class()
+            except Exception as e:
+                logger.warning(
+                    f"Failed to initialize detector {detector_class.__name__}: {e}"
+                )
+                continue
             if latency_tier is not None and detector.latency_tier != latency_tier:
                 continue
             if domain is not None and domain not in detector.domains:

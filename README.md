@@ -20,6 +20,10 @@ print(f"Score: {result.score}")  # 0.0 (human) → 1.0 (AI)
 print(f"Label: {result.label}")  # "human", "ai", "mixed", or "uncertain"
 ```
 
+## Calibration
+
+RAID-calibrated detector artifacts and usage notes are documented in [20260408-raid-calibration](docs/20260408-raid-calibration.md).
+
 ## Architecture
 
 ```

@@ -7,6 +7,8 @@ from typing import cast
 
 from provenance.core.base import BaseDetector, DetectorResult
 from provenance.core.calibration import CalibratedDetectorMixin
+from provenance.core.config import CurvatureThresholds
+from provenance.core.statistics import compute_mean_variance_std
 
 try:
     import torch
@@ -28,6 +30,7 @@ class CurvatureDetector(CalibratedDetectorMixin, BaseDetector):
     name = "curvature_detectgpt"
     latency_tier = "medium"
     domains = ["prose", "academic"]
+    calibration_aliases = ("curvature", "curvature_detectgpt")
 
     def __init__(
         self,
@@ -36,12 +39,14 @@ class CurvatureDetector(CalibratedDetectorMixin, BaseDetector):
         mask_ratio: float = 0.15,
         device: str = "auto",
         seed: int = 42,
+        thresholds: CurvatureThresholds | None = None,
     ):
         if torch is None:
             raise ImportError(
                 "torch and transformers are required for CurvatureDetector"
             )
 
+        self.thresholds = thresholds or CurvatureThresholds()
         self.model_name = model_name
         self.n_perturbations = n_perturbations
         self.mask_ratio = mask_ratio
@@ -79,7 +84,7 @@ class CurvatureDetector(CalibratedDetectorMixin, BaseDetector):
             text,
             return_tensors="pt",
             truncation=True,
-            max_length=512,
+            max_length=self.thresholds.max_token_length,
             add_special_tokens=True,
         )
         input_ids = encodings["input_ids"].to(self.device)
@@ -97,7 +102,7 @@ class CurvatureDetector(CalibratedDetectorMixin, BaseDetector):
 
         for idx in mask_indices:
             token_probs = probs[0, idx - 1]
-            top_k = min(50, token_probs.size(0))
+            top_k = min(self.thresholds.top_k_sampling, token_probs.size(0))
             top_probs, top_indices = torch.topk(token_probs, top_k)
             top_probs = top_probs / top_probs.sum()
             sampled_idx = cast(int, torch.multinomial(top_probs, 1).item())
@@ -112,7 +117,7 @@ class CurvatureDetector(CalibratedDetectorMixin, BaseDetector):
             text,
             return_tensors="pt",
             truncation=True,
-            max_length=512,
+            max_length=self.thresholds.max_token_length,
             add_special_tokens=True,
         )
         input_ids = encodings["input_ids"].to(self.device)
@@ -132,7 +137,7 @@ class CurvatureDetector(CalibratedDetectorMixin, BaseDetector):
                 perturbed_text,
                 return_tensors="pt",
                 truncation=True,
-                max_length=512,
+                max_length=self.thresholds.max_token_length,
                 add_special_tokens=True,
             )
             perturbed_ids = perturbed_enc["input_ids"].to(self.device)
@@ -142,12 +147,10 @@ class CurvatureDetector(CalibratedDetectorMixin, BaseDetector):
         if not perturbed_log_probs:
             return [0.0, 0.0, 0.0, 0.0, 0.0]
 
-        mean_perturbed = sum(perturbed_log_probs) / len(perturbed_log_probs)
-        curvature = original_log_prob - mean_perturbed
-        variance = sum((p - mean_perturbed) ** 2 for p in perturbed_log_probs) / len(
+        mean_perturbed, variance, std_perturbed = compute_mean_variance_std(
             perturbed_log_probs
         )
-        std_perturbed = variance**0.5
+        curvature = original_log_prob - mean_perturbed
 
         return [
             curvature,
@@ -167,90 +170,82 @@ class CurvatureDetector(CalibratedDetectorMixin, BaseDetector):
         ]
 
     def detect(self, text: str) -> DetectorResult:
-        encodings = self.tokenizer(
-            text,
-            return_tensors="pt",
-            truncation=True,
-            max_length=512,
-            add_special_tokens=True,
-        )
-        input_ids = encodings["input_ids"].to(self.device)
-
-        if input_ids.size(1) <= 2:
-            return DetectorResult(
-                score=0.5,
-                confidence=0.0,
-                metadata={"error": "Text too short for curvature analysis"},
-            )
-
-        original_log_prob = self._compute_log_prob(input_ids)
-
-        perturbed_log_probs = []
-        for _ in range(self.n_perturbations):
-            perturbed_text = self._perturb_text(text)
-            if not perturbed_text.strip():
-                continue
-
-            perturbed_enc = self.tokenizer(
-                perturbed_text,
+        try:
+            encodings = self.tokenizer(
+                text,
                 return_tensors="pt",
                 truncation=True,
-                max_length=512,
+                max_length=self.thresholds.max_token_length,
                 add_special_tokens=True,
             )
-            perturbed_ids = perturbed_enc["input_ids"].to(self.device)
-            log_prob = self._compute_log_prob(perturbed_ids)
-            perturbed_log_probs.append(log_prob)
+            input_ids = encodings["input_ids"].to(self.device)
 
-        if not perturbed_log_probs:
-            return DetectorResult(
-                score=0.5,
-                confidence=0.0,
-                metadata={"error": "Failed to generate perturbations"},
+            if input_ids.size(1) <= 2:
+                return self.build_error_result("Text too short for curvature analysis")
+
+            original_log_prob = self._compute_log_prob(input_ids)
+
+            perturbed_log_probs = []
+            for _ in range(self.n_perturbations):
+                perturbed_text = self._perturb_text(text)
+                if not perturbed_text.strip():
+                    continue
+
+                perturbed_enc = self.tokenizer(
+                    perturbed_text,
+                    return_tensors="pt",
+                    truncation=True,
+                    max_length=self.thresholds.max_token_length,
+                    add_special_tokens=True,
+                )
+                perturbed_ids = perturbed_enc["input_ids"].to(self.device)
+                log_prob = self._compute_log_prob(perturbed_ids)
+                perturbed_log_probs.append(log_prob)
+
+            if not perturbed_log_probs:
+                return self.build_error_result("Failed to generate perturbations")
+
+            mean_perturbed = sum(perturbed_log_probs) / len(perturbed_log_probs)
+            curvature = original_log_prob - mean_perturbed
+
+            variance = sum((p - mean_perturbed) ** 2 for p in perturbed_log_probs) / len(
+                perturbed_log_probs
             )
+            std_perturbed = variance**0.5
 
-        mean_perturbed = sum(perturbed_log_probs) / len(perturbed_log_probs)
-        curvature = original_log_prob - mean_perturbed
-
-        variance = sum((p - mean_perturbed) ** 2 for p in perturbed_log_probs) / len(
-            perturbed_log_probs
-        )
-        std_perturbed = variance**0.5
-
-        calibrated = self._get_calibrated_score(text)
-        if calibrated is not None:
-            score, confidence = calibrated
-        else:
-            abs_curvature = abs(curvature)
-
-            if abs_curvature < 0.05:
-                score = 0.5
-                confidence = 0.3
-            elif abs_curvature < 0.15:
-                score = 0.55 if curvature > 0 else 0.45
-                confidence = 0.5
-            elif abs_curvature < 0.3:
-                score = 0.65 if curvature > 0 else 0.35
-                confidence = 0.6
-            elif abs_curvature < 0.5:
-                score = 0.75 if curvature > 0 else 0.25
-                confidence = 0.7
+            calibrated = self._get_calibrated_score(text)
+            if calibrated is not None:
+                score, confidence = calibrated
             else:
-                score = 0.85 if curvature > 0 else 0.15
-                confidence = 0.8
+                abs_curvature = abs(curvature)
+                score = self.thresholds.curvature_bands[-1][1]
+                confidence = self.thresholds.curvature_bands[-1][2]
+                for boundary, positive_score, band_confidence in self.thresholds.curvature_bands:
+                    if abs_curvature < boundary:
+                        if boundary == float("inf"):
+                            score = positive_score if curvature > 0 else 1.0 - positive_score
+                        else:
+                            score = positive_score if curvature > 0 else 1.0 - positive_score
+                        confidence = band_confidence
+                        break
 
-        return DetectorResult(
-            score=score,
-            confidence=confidence,
-            metadata={
-                "curvature": curvature,
-                "original_log_prob": original_log_prob,
-                "mean_perturbed_log_prob": mean_perturbed,
-                "std_perturbed_log_prob": std_perturbed,
-                "n_perturbations": len(perturbed_log_probs),
-                "calibrated": calibrated is not None,
-            },
-        )
+            return DetectorResult(
+                score=score,
+                confidence=confidence,
+                metadata={
+                    "curvature": curvature,
+                    "original_log_prob": original_log_prob,
+                    "mean_perturbed_log_prob": mean_perturbed,
+                    "std_perturbed_log_prob": std_perturbed,
+                    "n_perturbations": len(perturbed_log_probs),
+                    "calibrated": calibrated is not None,
+                },
+            )
+        except Exception as e:
+            return self.build_error_result(
+                "Curvature analysis failed",
+                exception=e,
+            )
 
 
 def register(registry=None) -> None:

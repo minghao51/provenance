@@ -1,0 +1,93 @@
+{
+  "dataset": "raid",
+  "sample_limits": {
+    "entropy": 200,
+    "repetition": 200,
+    "burstiness": 200,
+    "surprisal": 200,
+    "curvature": 150
+  },
+  "selected_models": {
+    "repetition": "calibration_models/repetition_raid.pkl",
+    "burstiness": "calibration_models/burstiness_raid.pkl",
+    "surprisal_diveye": "calibration_models/surprisal_raid.pkl",
+    "curvature_detectgpt": "calibration_models/curvature_raid.pkl"
+  },
+  "results": {
+    "entropy": {
+      "selected": false,
+      "before": {
+        "auroc": 0.5,
+        "f1": 0.9189
+      },
+      "after": {
+        "auroc": 0.3848,
+        "f1": 0.9189
+      },
+      "delta": {
+        "auroc": -0.1152,
+        "f1": 0.0
+      }
+    },
+    "repetition": {
+      "selected": true,
+      "before": {
+        "auroc": 0.6324,
+        "f1": 0.3
+      },
+      "after": {
+        "auroc": 0.8235,
+        "f1": 0.9189
+      },
+      "delta": {
+        "auroc": 0.1912,
+        "f1": 0.6189
+      }
+    },
+    "burstiness": {
+      "selected": true,
+      "before": {
+        "auroc": 0.6103,
+        "f1": 0.6667
+      },
+      "after": {
+        "auroc": 0.9069,
+        "f1": 0.8889
+      },
+      "delta": {
+        "auroc": 0.2966,
+        "f1": 0.2222
+      }
+    },
+    "surprisal": {
+      "selected": true,
+      "before": {
+        "auroc": 0.6495,
+        "f1": 0.6667
+      },
+      "after": {
+        "auroc": 0.8775,
+        "f1": 0.9565
+      },
+      "delta": {
+        "auroc": 0.2279,
+        "f1": 0.2899
+      }
+    },
+    "curvature": {
+      "selected": true,
+      "before": {
+        "auroc": 0.3846,
+        "f1": 0.9286
+      },
+      "after": {
+        "auroc": 0.7788,
+        "f1": 0.9412
+      },
+      "delta": {
+        "auroc": 0.3942,
+        "f1": 0.0126
+      }
+    }
+  }
+}

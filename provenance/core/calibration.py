@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
+import os
 from pathlib import Path
 
 import joblib
@@ -37,6 +38,8 @@ class CalibratedDetectorMixin:
 
     _calibrator: Pipeline | None = None
     _feature_names: list[str] | None = None
+    calibration_aliases: tuple[str, ...] = ()
+    _loaded_calibration_path: Path | None = None
 
     @abstractmethod
     def _extract_features(self, text: str) -> list[float]:
@@ -130,3 +133,36 @@ class CalibratedDetectorMixin:
         data = joblib.load(path)
         self._calibrator = data["calibrator"]
         self._feature_names = data["feature_names"]
+        self._loaded_calibration_path = Path(path)
+
+    def load_default_calibration(self, search_dir: str | Path | None = None) -> Path | None:
+        """Load the most relevant persisted calibration model if one exists."""
+        if os.environ.get("PROVENANCE_DISABLE_AUTO_CALIBRATION"):
+            return None
+
+        root = Path(
+            search_dir
+            or os.environ.get("PROVENANCE_CALIBRATION_DIR")
+            or "calibration_models"
+        )
+        if not root.exists():
+            return None
+
+        aliases = {getattr(self, "name", "")}
+        aliases.update(self.calibration_aliases)
+        candidates: list[Path] = []
+
+        for alias in aliases:
+            if not alias:
+                continue
+            exact = root / f"{alias}.pkl"
+            if exact.exists():
+                candidates.append(exact)
+            candidates.extend(root.glob(f"{alias}_*.pkl"))
+
+        if not candidates:
+            return None
+
+        selected = max(candidates, key=lambda path: path.stat().st_mtime)
+        self.load_calibration(selected)
+        return selected

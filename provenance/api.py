@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import os
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
@@ -19,7 +20,8 @@ async def lifespan(app: FastAPI):
     global _provenance_cache
     registry = get_registry()
     registry.load_entry_points()
-    _provenance_cache = Provenance()
+    config_path = os.environ.get("PROVENANCE_CONFIG")
+    _provenance_cache = Provenance(config=config_path)
     yield
 
 
@@ -74,6 +76,7 @@ def _get_provenance(
     return Provenance(
         detectors=detectors,
         ensemble_strategy=ensemble_strategy,  # type: ignore[arg-type]
+        config=os.environ.get("PROVENANCE_CONFIG"),
     )
 
 

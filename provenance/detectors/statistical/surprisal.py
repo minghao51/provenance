@@ -10,6 +10,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from provenance.core.base import BaseDetector, DetectorResult
 from provenance.core.calibration import CalibratedDetectorMixin
+from provenance.core.config import SurprisalThresholds
 
 
 class SurprisalDetector(CalibratedDetectorMixin, BaseDetector):
@@ -24,15 +25,18 @@ class SurprisalDetector(CalibratedDetectorMixin, BaseDetector):
     name = "surprisal_diveye"
     latency_tier = "medium"
     domains = ["prose", "academic"]
+    calibration_aliases = ("surprisal", "surprisal_diveye")
 
     def __init__(
         self,
         model_name: str = "EleutherAI/gpt-neo-125M",
         window_size: int = 512,
         device: str = "auto",
+        thresholds: SurprisalThresholds | None = None,
     ):
         self.model_name = model_name
         self.window_size = window_size
+        self.thresholds = thresholds or SurprisalThresholds()
 
         if device == "auto":
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -171,83 +175,78 @@ class SurprisalDetector(CalibratedDetectorMixin, BaseDetector):
         ]
 
     def detect(self, text: str) -> DetectorResult:
-        surprisals = self._compute_token_surprisals(text)
+        try:
+            surprisals = self._compute_token_surprisals(text)
 
-        if len(surprisals) < 5:
-            return DetectorResult(
-                score=0.5,
-                confidence=0.0,
-                metadata={"error": "Text too short for surprisal analysis"},
-            )
+            if len(surprisals) < self.thresholds.min_surprisal_tokens:
+                return self.build_error_result("Text too short for surprisal analysis")
 
-        variance = self._compute_surprisal_variance(surprisals)
-        autocorr = self._compute_surprisal_autocorrelation(surprisals)
-        burstiness = self._compute_surprisal_burstiness(surprisals)
-        entropy = self._compute_surprisal_entropy(surprisals)
-        trend = self._compute_surprisal_trend(surprisals)
-        mean_surprisal = sum(surprisals) / len(surprisals)
+            variance = self._compute_surprisal_variance(surprisals)
+            autocorr = self._compute_surprisal_autocorrelation(surprisals)
+            burstiness = self._compute_surprisal_burstiness(surprisals)
+            entropy = self._compute_surprisal_entropy(surprisals)
+            trend = self._compute_surprisal_trend(surprisals)
+            mean_surprisal = sum(surprisals) / len(surprisals)
 
-        calibrated = self._get_calibrated_score(text)
-        if calibrated is not None:
-            score, confidence = calibrated
-        else:
-            ai_score = 0.0
-
-            if variance < 2.0:
-                ai_score += 0.25
-            elif variance < 5.0:
-                ai_score += 0.15
-            elif variance < 10.0:
-                ai_score += 0.05
-
-            if autocorr < 0.1:
-                ai_score += 0.2
-            elif autocorr < 0.3:
-                ai_score += 0.1
-            elif autocorr < 0.5:
-                ai_score += 0.05
-
-            if burstiness < 0.3:
-                ai_score += 0.2
-            elif burstiness < 0.5:
-                ai_score += 0.1
-            elif burstiness < 0.7:
-                ai_score += 0.05
-
-            if mean_surprisal < 3.0:
-                ai_score += 0.15
-            elif mean_surprisal < 5.0:
-                ai_score += 0.1
-            elif mean_surprisal < 7.0:
-                ai_score += 0.05
-
-            if abs(trend) < 0.01:
-                ai_score += 0.1
-            elif abs(trend) < 0.05:
-                ai_score += 0.05
-
-            score = min(1.0, max(0.0, ai_score))
-
-            if variance < 3.0 and burstiness < 0.4:
-                confidence = 0.85
-            elif variance < 7.0 and burstiness < 0.6:
-                confidence = 0.7
+            calibrated = self._get_calibrated_score(text)
+            if calibrated is not None:
+                score, confidence = calibrated
             else:
-                confidence = 0.55
+                ai_score = 0.0
 
-        return DetectorResult(
-            score=score,
-            confidence=confidence,
-            metadata={
-                "surprisal_variance": variance,
-                "surprisal_autocorr": autocorr,
-                "surprisal_burstiness": burstiness,
-                "surprisal_entropy": entropy,
-                "surprisal_trend": trend,
-                "mean_surprisal": mean_surprisal,
-                "calibrated": calibrated is not None,
-            },
-        )
+                for threshold, increment in self.thresholds.variance_bands:
+                    if variance < threshold:
+                        ai_score += increment
+                        break
+
+                for threshold, increment in self.thresholds.autocorr_bands:
+                    if autocorr < threshold:
+                        ai_score += increment
+                        break
+
+                for threshold, increment in self.thresholds.burstiness_bands:
+                    if burstiness < threshold:
+                        ai_score += increment
+                        break
+
+                for threshold, increment in self.thresholds.mean_surprisal_bands:
+                    if mean_surprisal < threshold:
+                        ai_score += increment
+                        break
+
+                abs_trend = abs(trend)
+                for threshold, increment in self.thresholds.trend_bands:
+                    if abs_trend < threshold:
+                        ai_score += increment
+                        break
+
+                score = min(1.0, max(0.0, ai_score))
+
+                if variance < 3.0 and burstiness < 0.4:
+                    confidence = 0.85
+                elif variance < 7.0 and burstiness < 0.6:
+                    confidence = 0.7
+                else:
+                    confidence = 0.55
+
+            return DetectorResult(
+                score=score,
+                confidence=confidence,
+                metadata={
+                    "surprisal_variance": variance,
+                    "surprisal_autocorr": autocorr,
+                    "surprisal_burstiness": burstiness,
+                    "surprisal_entropy": entropy,
+                    "surprisal_trend": trend,
+                    "mean_surprisal": mean_surprisal,
+                    "calibrated": calibrated is not None,
+                },
+            )
+        except Exception as e:
+            return self.build_error_result(
+                "Surprisal analysis failed",
+                exception=e,
+            )
 
 
 def register(registry=None) -> None:

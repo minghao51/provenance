@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Literal
 
 from provenance.core.base import DetectorResult, SentinelResult, TokenScore
-from provenance.core.config import ProvenanceConfig
+from provenance.core.config import ProvenanceConfig, resolve_provenance_config
 from provenance.core.ensemble import Ensemble, EnsembleConfig
 from provenance.core.preprocessor import Preprocessor
 from provenance.core.registry import get_registry
@@ -27,9 +27,9 @@ class Provenance:
         weights: dict[str, float] | None = None,
         latency_budget: Literal["fast", "medium", "slow"] | None = None,
         preprocessor: Preprocessor | None = None,
-        config: ProvenanceConfig | None = None,
+        config: ProvenanceConfig | str | None = None,
     ):
-        self.config = config or ProvenanceConfig()
+        self.config = resolve_provenance_config(config)
         self.preprocessor = preprocessor or Preprocessor()
         self.registry = get_registry()
         self.registry.load_entry_points()
@@ -52,6 +52,19 @@ class Provenance:
         for name in detector_names:
             detector = self.registry.get(name)
             if detector:
+                if hasattr(detector, "load_calibration"):
+                    calibration_path = self.config.detector_calibration_paths.get(
+                        detector.name
+                    )
+                    if calibration_path:
+                        detector.load_calibration(calibration_path)
+                    elif (
+                        self.config.calibration_model_dir
+                        and hasattr(detector, "load_default_calibration")
+                    ):
+                        detector.load_default_calibration(
+                            self.config.calibration_model_dir
+                        )
                 self.ensemble.add_detector(detector)
 
     def _aggregate_chunk_results(
@@ -194,3 +207,31 @@ class Provenance:
             labels=labels,
             languages=languages,
         )
+
+    def apply_detector_thresholds(
+        self,
+        detector_name: str,
+        thresholds: "EntropyThresholds | BurstinessThresholds | RepetitionThresholds | CurvatureThresholds | SurprisalThresholds",
+    ) -> bool:
+        """Apply threshold configuration to a specific detector in the ensemble.
+
+        Args:
+            detector_name: Name of the detector to configure
+            thresholds: Threshold configuration object
+
+        Returns:
+            True if thresholds were applied, False if detector not found
+        """
+        from provenance.core.config import (
+            BurstinessThresholds,
+            CurvatureThresholds,
+            EntropyThresholds,
+            RepetitionThresholds,
+            SurprisalThresholds,
+        )
+
+        for detector in self.ensemble.detectors:
+            if detector.name == detector_name and hasattr(detector, "thresholds"):
+                detector.thresholds = thresholds
+                return True
+        return False

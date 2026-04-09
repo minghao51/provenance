@@ -10,9 +10,11 @@ Usage:
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -43,13 +45,23 @@ DETECTOR_MAP = {
 OUTPUT_DIR = Path("calibration_models")
 
 
-def _import_detector(name: str):
+def _import_detector(name: str, *, autoload_calibration: bool = True):
     entry = DETECTOR_MAP.get(name)
     if entry is None:
         raise ValueError(f"Unknown detector: {name}")
     module_path, class_name = entry
-    module = __import__(module_path, fromlist=[class_name])
-    return getattr(module, class_name)()
+    previous_disable = os.environ.get("PROVENANCE_DISABLE_AUTO_CALIBRATION")
+    if not autoload_calibration:
+        os.environ["PROVENANCE_DISABLE_AUTO_CALIBRATION"] = "1"
+    try:
+        module = __import__(module_path, fromlist=[class_name])
+        return getattr(module, class_name)()
+    finally:
+        if not autoload_calibration:
+            if previous_disable is None:
+                os.environ.pop("PROVENANCE_DISABLE_AUTO_CALIBRATION", None)
+            else:
+                os.environ["PROVENANCE_DISABLE_AUTO_CALIBRATION"] = previous_disable
 
 
 def _load_data(dataset: str, limit: int | None, seed: int):
@@ -91,6 +103,88 @@ def _evaluate_detector(detector, texts, labels, evaluator, name):
     metrics = evaluator.compute_metrics(labels, y_pred, y_score)
     metrics["name"] = name
     return metrics
+
+
+def _preferred_calibration_key(detector_name: str) -> str:
+    try:
+        detector = _import_detector(detector_name, autoload_calibration=False)
+    except Exception:
+        return detector_name
+
+    aliases = getattr(detector, "calibration_aliases", ())
+    if aliases:
+        return str(aliases[-1])
+    return detector_name
+
+
+def _resolve_model_path(
+    detector_name: str, dataset: str, summary: dict[str, Any], output_dir: str
+) -> str | None:
+    candidate_keys = [detector_name, _preferred_calibration_key(detector_name)]
+    selected_models = summary.get("selected_models", {})
+
+    for key in candidate_keys:
+        model_path = selected_models.get(key)
+        if model_path:
+            return str(model_path)
+
+    fallback_path = Path(output_dir) / f"{detector_name}_{dataset}.pkl"
+    if fallback_path.exists():
+        return str(fallback_path)
+
+    return None
+
+
+def _build_rejection_reasons(
+    metrics: dict[str, Any],
+    *,
+    min_auroc_improvement: float,
+    max_f1_regression: float,
+    min_tpr_at_1fpr_improvement: float | None,
+) -> list[str]:
+    before = metrics.get("before", {})
+    after = metrics.get("after", {})
+    delta = metrics.get("delta", {})
+    reasons: list[str] = []
+
+    delta_auroc = float(
+        delta.get("auroc", float(after.get("auroc", 0.0)) - float(before.get("auroc", 0.0)))
+    )
+    if delta_auroc < min_auroc_improvement:
+        reasons.append(
+            f"delta_auroc {delta_auroc:.4f} below threshold {min_auroc_improvement:.4f}"
+        )
+
+    f1_regression = float(before.get("f1", 0.0)) - float(after.get("f1", 0.0))
+    if f1_regression > max_f1_regression:
+        reasons.append(
+            f"f1 regression {f1_regression:.4f} exceeds threshold {max_f1_regression:.4f}"
+        )
+
+    if min_tpr_at_1fpr_improvement is not None:
+        before_tpr = before.get("tpr_at_1fpr")
+        after_tpr = after.get("tpr_at_1fpr")
+        if before_tpr is None or after_tpr is None:
+            reasons.append("tpr_at_1fpr unavailable for requested policy gate")
+        else:
+            delta_tpr = float(after_tpr) - float(before_tpr)
+            if delta_tpr < min_tpr_at_1fpr_improvement:
+                reasons.append(
+                    f"delta_tpr_at_1fpr {delta_tpr:.4f} below threshold {min_tpr_at_1fpr_improvement:.4f}"
+                )
+
+    return reasons
+
+
+def _render_curated_config(model_paths: dict[str, str], calibration_dir: str) -> str:
+    lines = [
+        "provenance:",
+        f"  calibration_model_dir: {calibration_dir}",
+        "  detector_calibration_paths:",
+    ]
+    for detector_name, model_path in model_paths.items():
+        lines.append(f"    {detector_name}: {model_path}")
+    return "\n".join(lines) + "\n"
 
 
 @click.group()
@@ -147,7 +241,7 @@ def train(detector, dataset, limit, method, cv, output_dir, seed):
         click.echo(f"{'=' * 60}")
 
         try:
-            det = _import_detector(det_name)
+            det = _import_detector(det_name, autoload_calibration=False)
         except Exception as e:
             click.echo(f"  Failed to load detector: {e}", err=True)
             continue
@@ -239,7 +333,7 @@ def compare(detector, dataset, limit, seed):
             continue
 
         try:
-            det = _import_detector(det_name)
+            det = _import_detector(det_name, autoload_calibration=False)
         except Exception as e:
             click.echo(f"Skipping {det_name}: {e}", err=True)
             continue
@@ -289,7 +383,7 @@ def evaluate(detector, model, dataset, limit, seed):
     texts, labels = _load_data(dataset, limit, seed)
     evaluator = BenchmarkEvaluator()
 
-    det = _import_detector(detector)
+    det = _import_detector(detector, autoload_calibration=False)
     det.load_calibration(model)
 
     metrics = _evaluate_detector(det, texts, labels, evaluator, "calibrated")
@@ -297,6 +391,120 @@ def evaluate(detector, model, dataset, limit, seed):
     for k, v in metrics.items():
         if k != "name" and isinstance(v, (int, float)):
             click.echo(f"  {k}: {v:.4f}")
+
+
+@cli.command("promote")
+@click.option(
+    "--summary-path",
+    default=str(OUTPUT_DIR / "raid_calibration_summary.json"),
+    type=click.Path(exists=True, path_type=Path),
+    help="Calibration summary JSON to evaluate for promotion",
+)
+@click.option(
+    "--output-config",
+    default="provenance.calibrated.yaml",
+    type=click.Path(path_type=Path),
+    help="Path for the generated curated config",
+)
+@click.option(
+    "--output-summary",
+    default=None,
+    type=click.Path(path_type=Path),
+    help="Optional path for the promotion decision summary",
+)
+@click.option(
+    "--calibration-dir",
+    default=str(OUTPUT_DIR),
+    help="Calibration model directory recorded in the generated config",
+)
+@click.option(
+    "--min-auroc-improvement",
+    default=0.01,
+    type=float,
+    show_default=True,
+    help="Minimum AUROC improvement required to promote a calibrated model",
+)
+@click.option(
+    "--max-f1-regression",
+    default=0.0,
+    type=float,
+    show_default=True,
+    help="Maximum allowable F1 regression for promoted models",
+)
+@click.option(
+    "--min-tpr-at-1fpr-improvement",
+    default=None,
+    type=float,
+    help="Optional minimum TPR@1%%FPR improvement gate",
+)
+def promote(
+    summary_path: Path,
+    output_config: Path,
+    output_summary: Path | None,
+    calibration_dir: str,
+    min_auroc_improvement: float,
+    max_f1_regression: float,
+    min_tpr_at_1fpr_improvement: float | None,
+):
+    """Promote calibration artifacts into a curated config using explicit policy gates."""
+    summary = json.loads(summary_path.read_text())
+    dataset = summary.get("dataset", "unknown")
+    results = summary.get("results", {})
+
+    selected_models: dict[str, str] = {}
+    rejected_models: dict[str, dict[str, Any]] = {}
+
+    for detector_name, metrics in results.items():
+        reasons = _build_rejection_reasons(
+            metrics,
+            min_auroc_improvement=min_auroc_improvement,
+            max_f1_regression=max_f1_regression,
+            min_tpr_at_1fpr_improvement=min_tpr_at_1fpr_improvement,
+        )
+        model_path = _resolve_model_path(detector_name, dataset, summary, calibration_dir)
+
+        if model_path is None:
+            reasons.append("no calibration model artifact found")
+
+        if reasons:
+            rejected_models[detector_name] = {
+                "reasons": reasons,
+                "model_path": model_path,
+                "before": metrics.get("before", {}),
+                "after": metrics.get("after", {}),
+                "delta": metrics.get("delta", {}),
+            }
+            continue
+
+        selected_models[_preferred_calibration_key(detector_name)] = model_path
+
+    output_config.parent.mkdir(parents=True, exist_ok=True)
+    output_config.write_text(
+        _render_curated_config(selected_models, calibration_dir), encoding="utf-8"
+    )
+
+    decision_summary = {
+        "dataset": dataset,
+        "source_summary": str(summary_path),
+        "policy": {
+            "min_auroc_improvement": min_auroc_improvement,
+            "max_f1_regression": max_f1_regression,
+            "min_tpr_at_1fpr_improvement": min_tpr_at_1fpr_improvement,
+        },
+        "selected_models": selected_models,
+        "rejected_models": rejected_models,
+    }
+
+    summary_output_path = output_summary or output_config.with_suffix(".summary.json")
+    summary_output_path.write_text(
+        json.dumps(decision_summary, indent=2, sort_keys=True), encoding="utf-8"
+    )
+
+    click.echo(f"Generated curated config: {output_config}")
+    click.echo(f"Promotion summary: {summary_output_path}")
+    click.echo(
+        f"Promoted {len(selected_models)} model(s); rejected {len(rejected_models)} model(s)."
+    )
 
 
 if __name__ == "__main__":

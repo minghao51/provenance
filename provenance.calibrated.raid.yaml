@@ -1,0 +1,7 @@
+provenance:
+  calibration_model_dir: calibration_models
+  detector_calibration_paths:
+    repetition: calibration_models/repetition_raid.pkl
+    burstiness: calibration_models/burstiness_raid.pkl
+    surprisal_diveye: calibration_models/surprisal_raid.pkl
+    curvature_detectgpt: calibration_models/curvature_raid.pkl

@@ -7,6 +7,7 @@ from pathlib import Path
 import joblib
 
 from provenance.core.base import BaseDetector, DetectorResult
+from provenance.core.errors import DetectorInitError, ModelNotFoundError
 
 try:
     import lightgbm as lgb
@@ -27,14 +28,20 @@ class LightGBMDetector(BaseDetector):
         feature_extractor=None,
     ):
         if lgb is None or shap is None:
-            raise ImportError("lightgbm and shap are required for LightGBMDetector")
+            raise DetectorInitError("lightgbm and shap are required for LightGBMDetector")
 
         self.model = None
         self.explainer = None
         self.feature_names: list[str] = []
         self.feature_extractor = feature_extractor
 
-        if model_path and Path(model_path).exists():
+        if model_path:
+            path = Path(model_path)
+            if not path.exists():
+                raise ModelNotFoundError(
+                    f"LightGBM model file not found: {model_path}",
+                    model_path=model_path,
+                )
             self.load_model(model_path)
         else:
             self._init_default_model()
@@ -62,6 +69,13 @@ class LightGBMDetector(BaseDetector):
 
     def load_model(self, model_path: str) -> None:
         from provenance.detectors.stylometric.feature_extractor import FeatureExtractor
+
+        path = Path(model_path)
+        if not path.exists():
+            raise ModelNotFoundError(
+                f"LightGBM model file not found: {model_path}",
+                model_path=model_path,
+            )
 
         if self.feature_extractor is None:
             self.feature_extractor = FeatureExtractor()

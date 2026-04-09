@@ -9,6 +9,7 @@ from functools import lru_cache
 
 from provenance.core.base import BaseDetector, DetectorResult
 from provenance.core.calibration import CalibratedDetectorMixin
+from provenance.core.config import EntropyThresholds
 from provenance.core.preprocessor import Preprocessor
 
 logger = logging.getLogger(__name__)
@@ -30,8 +31,10 @@ class EntropyDetector(CalibratedDetectorMixin, BaseDetector):
     name = "entropy"
     latency_tier = "fast"
     domains = ["prose", "academic"]
+    calibration_aliases = ("entropy",)
 
-    def __init__(self):
+    def __init__(self, thresholds: EntropyThresholds | None = None):
+        self.thresholds = thresholds or EntropyThresholds()
         self.word_frequencies: Counter[str] | None = None
         self.preprocessor = Preprocessor()
         self._load_brown_frequencies()
@@ -105,36 +108,42 @@ class EntropyDetector(CalibratedDetectorMixin, BaseDetector):
         return ["unigram_entropy", "kl_divergence"]
 
     def detect(self, text: str) -> DetectorResult:
-        text_entropy = self._compute_unigram_entropy(text)
-        kl_div = self._compute_kl_divergence(text)
+        try:
+            text_entropy = self._compute_unigram_entropy(text)
+            kl_div = self._compute_kl_divergence(text)
 
-        calibrated = self._get_calibrated_score(text)
-        if calibrated is not None:
-            score, confidence = calibrated
-        else:
-            if kl_div > 2.0:
-                score = 0.8
-                confidence = 0.7
-            elif kl_div > 1.0:
-                score = 0.6
-                confidence = 0.6
-            elif kl_div > 0.5:
-                score = 0.4
-                confidence = 0.5
+            calibrated = self._get_calibrated_score(text)
+            if calibrated is not None:
+                score, confidence = calibrated
             else:
-                score = 0.2
-                confidence = 0.6
+                if kl_div > self.thresholds.kl_div_high:
+                    score = self.thresholds.kl_div_high_score
+                    confidence = self.thresholds.kl_div_high_confidence
+                elif kl_div > self.thresholds.kl_div_medium:
+                    score = self.thresholds.kl_div_medium_score
+                    confidence = self.thresholds.kl_div_medium_confidence
+                elif kl_div > self.thresholds.kl_div_low:
+                    score = self.thresholds.kl_div_low_score
+                    confidence = self.thresholds.kl_div_low_confidence
+                else:
+                    score = self.thresholds.kl_div_default_score
+                    confidence = self.thresholds.kl_div_default_confidence
 
-        return DetectorResult(
-            score=score,
-            confidence=confidence,
-            metadata={
-                "text_entropy": text_entropy,
-                "kl_divergence": kl_div,
-                "vocabulary_size": len(set(self.preprocessor.tokenize_words(text))),
-                "calibrated": calibrated is not None,
-            },
-        )
+            return DetectorResult(
+                score=score,
+                confidence=confidence,
+                metadata={
+                    "text_entropy": text_entropy,
+                    "kl_divergence": kl_div,
+                    "vocabulary_size": len(set(self.preprocessor.tokenize_words(text))),
+                    "calibrated": calibrated is not None,
+                },
+            )
+        except Exception as e:
+            return self.build_error_result(
+                "Entropy analysis failed",
+                exception=e,
+            )
 
 
 def register(registry=None) -> None:

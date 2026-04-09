@@ -41,6 +41,7 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.0",
     "pre-commit>=3.0",
+    "datasets",
 ]
 statistical = [
     "transformers>=4.35",
@@ -76,6 +77,7 @@ all = [
     "langdetect",
     "numpy",
     "scipy",
+    "datasets",
     "transformers>=4.35",
     "torch>=2.0",
     "nltk>=3.8",

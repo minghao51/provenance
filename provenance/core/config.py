@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+from dataclasses import asdict, dataclass, field, fields, is_dataclass
+from pathlib import Path
+from typing import Any, TypeVar, get_args, get_origin
+
+try:
+    import yaml
+except ImportError:
+    yaml = None
 
 
 @dataclass
@@ -17,6 +25,116 @@ class ProvenanceConfig:
         "Text is shorter than recommended minimum ({min_length} words). "
         "Results may be unreliable."
     )
+    calibration_model_dir: str | None = None
+    detector_calibration_paths: dict[str, str] = field(default_factory=dict)
+
+
+T = TypeVar("T")
+
+
+def _unwrap_dataclass_type(type_hint: Any) -> type[Any] | None:
+    if is_dataclass(type_hint):
+        return type_hint
+
+    origin = get_origin(type_hint)
+    if origin is None:
+        return None
+
+    for arg in get_args(type_hint):
+        if arg is type(None):
+            continue
+        if is_dataclass(arg):
+            return arg
+    return None
+
+
+def _coerce_value(type_hint: Any, value: Any) -> Any:
+    nested_type = _unwrap_dataclass_type(type_hint)
+    if nested_type is not None and isinstance(value, dict):
+        return _build_dataclass(nested_type, value)
+    return value
+
+
+def _build_dataclass(cls: type[T], data: dict[str, Any]) -> T:
+    field_map = {item.name: item for item in fields(cls)}
+    kwargs: dict[str, Any] = {}
+    for key, value in data.items():
+        if key not in field_map:
+            continue
+        kwargs[key] = _coerce_value(field_map[key].type, value)
+    return cls(**kwargs)
+
+
+def _merge_dicts(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in overrides.items():
+        if (
+            key in merged
+            and isinstance(merged[key], dict)
+            and isinstance(value, dict)
+        ):
+            merged[key] = _merge_dicts(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def load_config_data(path: str | Path) -> dict[str, Any]:
+    config_path = Path(path)
+    raw_text = config_path.read_text(encoding="utf-8")
+    suffix = config_path.suffix.lower()
+
+    if suffix == ".json":
+        data = json.loads(raw_text)
+    elif suffix in {".yaml", ".yml"}:
+        if yaml is None:
+            raise ImportError("PyYAML is required to load YAML config files")
+        data = yaml.safe_load(raw_text)
+    else:
+        raise ValueError(
+            f"Unsupported config file format: {config_path.suffix or '<none>'}"
+        )
+
+    if not isinstance(data, dict):
+        raise ValueError("Config file must contain a JSON/YAML object")
+
+    return data
+
+
+def load_provenance_config(
+    source: str | Path | dict[str, Any],
+    overrides: dict[str, Any] | None = None,
+) -> ProvenanceConfig:
+    if isinstance(source, (str, Path)):
+        data = load_config_data(source)
+    else:
+        data = dict(source)
+
+    if "provenance" in data and isinstance(data["provenance"], dict):
+        data = data["provenance"]
+
+    if overrides:
+        data = _merge_dicts(data, overrides)
+
+    return _build_dataclass(ProvenanceConfig, data)
+
+
+def resolve_provenance_config(
+    config: ProvenanceConfig | str | Path | dict[str, Any] | None,
+    overrides: dict[str, Any] | None = None,
+) -> ProvenanceConfig:
+    if config is None:
+        base = ProvenanceConfig()
+        if overrides:
+            return load_provenance_config(asdict(base), overrides=overrides)
+        return base
+
+    if isinstance(config, ProvenanceConfig):
+        if not overrides:
+            return config
+        return load_provenance_config(asdict(config), overrides=overrides)
+
+    return load_provenance_config(config, overrides=overrides)
 
 
 @dataclass

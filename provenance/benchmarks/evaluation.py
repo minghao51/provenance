@@ -3,36 +3,17 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
-
-import numpy as np
 
 if TYPE_CHECKING:
     from provenance.core.base import BaseDetector
 
-from provenance.benchmarks.metrics import (
-    compute_accuracy,
-    compute_auroc_fallback,
-    compute_f1,
-    compute_fpr_at_tpr_fallback,
-    compute_precision,
-    compute_recall,
-)
+from provenance.benchmarks.evaluator import BenchmarkEvaluator
+from provenance.benchmarks.loaders import HuggingFaceDatasetLoader
+from provenance.benchmarks.models import BenchmarkResult
+from provenance.benchmarks.registry import DatasetRegistry, register_default_datasets
 
-
-@dataclass
-class BenchmarkResult:
-    detector_name: str
-    dataset: str
-    auroc: float
-    f1: float
-    fpr_at_10tpr: float
-    precision: float
-    recall: float
-    accuracy: float
-    num_samples: int
-    metadata: dict
+register_default_datasets()
 
 
 class BenchmarkHarness:
@@ -43,108 +24,20 @@ class BenchmarkHarness:
         self.results: list[BenchmarkResult] = []
         self.sample_limit = sample_limit
         self.detector: BaseDetector | None = None
+        self.dataset_loader = HuggingFaceDatasetLoader()
+        self.evaluator = BenchmarkEvaluator(dataset_loader=self.dataset_loader)
 
     def load_dataset(self, name: str) -> tuple[list[str], list[int]]:
-        if name == "hc3":
-            return self._load_hc3()
-        elif name == "raid":
-            return self._load_raid()
-        elif name == "m4":
-            return self._load_m4()
-        else:
+        config = DatasetRegistry.get(name)
+        if config is None:
             raise ValueError(f"Unknown dataset: {name}")
-
-    def _load_hc3(self) -> tuple[list[str], list[int]]:
         try:
-            from datasets import load_dataset
-
-            ds = load_dataset("Hello-SimpleAI/HC3", name="all", split="validation")
-            texts = []
-            labels = []
-            for item in ds:
-                text = item.get("text", "")
-                label = item.get("label", "")
-                if text and label:
-                    texts.append(text)
-                    labels.append(0 if label == "human" else 1)
-            if self.sample_limit:
-                texts = texts[: self.sample_limit]
-                labels = labels[: self.sample_limit]
-            return texts, labels
+            texts, labels, _ = self.dataset_loader.load(
+                config, sample_limit=self.sample_limit
+            )
         except Exception:
             return [], []
-
-    def _load_raid(self) -> tuple[list[str], list[int]]:
-        try:
-            from datasets import load_dataset
-
-            ds = load_dataset("liamdugan/raid", split="train")
-
-            texts = []
-            labels = []
-            for item in ds:
-                if "text" in item and "label" in item:
-                    texts.append(item["text"])
-                    labels.append(int(item["label"]))
-            if self.sample_limit:
-                texts = texts[: self.sample_limit]
-                labels = labels[: self.sample_limit]
-            return texts, labels
-        except Exception:
-            return [], []
-
-    def _load_m4(self) -> tuple[list[str], list[int]]:
-        try:
-            from datasets import load_dataset
-
-            ds = load_dataset("NickyNicky/M4", split="train")
-            texts = []
-            labels = []
-            for item in ds:
-                if "text" in item and "label" in item:
-                    texts.append(item["text"])
-                    labels.append(int(item["label"]))
-            if self.sample_limit:
-                texts = texts[: self.sample_limit]
-                labels = labels[: self.sample_limit]
-            return texts, labels
-        except Exception:
-            return [], []
-
-    def _compute_auroc(self, y_true: list[int], y_score: list[float]) -> float:
-        try:
-            from sklearn.metrics import roc_auc_score
-
-            return float(roc_auc_score(y_true, y_score))
-        except Exception:
-            return compute_auroc_fallback(y_true, y_score)
-
-    def _compute_metrics(
-        self,
-        y_true: list[int],
-        y_pred: list[int],
-        y_score: list[float],
-    ) -> dict:
-        accuracy = compute_accuracy(y_true, y_pred)
-        precision = compute_precision(y_true, y_pred)
-        recall = compute_recall(y_true, y_pred)
-        f1 = compute_f1(precision, recall)
-
-        try:
-            from sklearn.metrics import roc_curve
-
-            fpr, tpr, _ = roc_curve(y_true, y_score)
-            fpr_at_10tpr = float(np.interp(0.9, tpr, fpr))
-        except Exception:
-            fpr_at_10tpr = compute_fpr_at_tpr_fallback(y_true, y_score, 0.9)
-
-        return {
-            "accuracy": accuracy,
-            "f1": f1,
-            "precision": precision,
-            "recall": recall,
-            "fpr_at_10tpr": fpr_at_10tpr,
-        }
+        return texts, labels
 
     def evaluate(
         self,
@@ -154,31 +47,15 @@ class BenchmarkHarness:
         threshold: float = 0.5,
         dataset_name: str = "unknown",
     ) -> BenchmarkResult:
-        y_score = []
-        for text in texts:
-            try:
-                result = detector.detect(text)
-                y_score.append(result.score)
-            except Exception:
-                y_score.append(0.5)
-
-        y_pred = [1 if s >= threshold else 0 for s in y_score]
-
-        metrics = self._compute_metrics(labels, y_pred, y_score)
-        auroc = self._compute_auroc(labels, y_score)
-
-        return BenchmarkResult(
-            detector_name=detector.name,
-            dataset=dataset_name,
-            auroc=auroc,
-            f1=metrics["f1"],
-            fpr_at_10tpr=metrics["fpr_at_10tpr"],
-            precision=metrics["precision"],
-            recall=metrics["recall"],
-            accuracy=metrics["accuracy"],
-            num_samples=len(texts),
-            metadata={},
+        result = self.evaluator.evaluate_detector(
+            detector,
+            texts,
+            labels,
+            threshold=threshold,
+            dataset_name=dataset_name,
         )
+        self.results.append(result)
+        return result
 
     def audit_fpr(
         self,
@@ -234,11 +111,11 @@ class BenchmarkHarness:
 
         fp = 0
         n = 0
-        for text, label in zip(texts, labels, strict=False):
+        scores = self.evaluator.score_texts(detector, texts)
+        for label, score in zip(labels, scores, strict=False):
             if label == 0:
                 n += 1
-                result = detector.detect(text)
-                if result.score >= 0.5:
+                if score >= 0.5:
                     fp += 1
 
         return fp / n if n > 0 else 0.0
@@ -251,6 +128,8 @@ class BenchmarkHarness:
             lines.append(f"- **Dataset**: {result.dataset}")
             lines.append(f"- **AUROC**: {result.auroc:.4f}")
             lines.append(f"- **F1**: {result.f1:.4f}")
+            lines.append(f"- **TPR@1%FPR**: {result.tpr_at_1fpr:.4f}")
+            lines.append(f"- **TPR@5%FPR**: {result.tpr_at_5fpr:.4f}")
             lines.append(f"- **FPR@10%TPR**: {result.fpr_at_10tpr:.4f}")
             lines.append(f"- **Precision**: {result.precision:.4f}")
             lines.append(f"- **Recall**: {result.recall:.4f}")
@@ -268,12 +147,18 @@ class BenchmarkHarness:
                         "dataset": r.dataset,
                         "auroc": r.auroc,
                         "f1": r.f1,
+                        "tpr_at_1fpr": r.tpr_at_1fpr,
+                        "tpr_at_5fpr": r.tpr_at_5fpr,
                         "fpr_at_10tpr": r.fpr_at_10tpr,
                         "precision": r.precision,
                         "recall": r.recall,
                         "accuracy": r.accuracy,
                         "num_samples": r.num_samples,
+                        "num_positives": r.num_positives,
+                        "num_negatives": r.num_negatives,
+                        "eval_time_seconds": r.eval_time_seconds,
                         "metadata": r.metadata,
+                        "stratified_results": r.stratified_results,
                     }
                     for r in results
                 ],

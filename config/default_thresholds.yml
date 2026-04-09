@@ -1,0 +1,134 @@
+# Default detector thresholds for AI text detection
+# This file demonstrates the configuration format for detector thresholds
+
+# Entropy detector thresholds
+# The entropy detector measures the difference in word frequency distributions
+# between the input text and a reference corpus (Brown corpus)
+entropy:
+  # High KL divergence threshold (strong indication of AI-generated text)
+  kl_div_high: 2.0
+  kl_div_high_score: 0.8
+  kl_div_high_confidence: 0.7
+
+  # Medium KL divergence threshold
+  kl_div_medium: 1.0
+  kl_div_medium_score: 0.6
+  kl_div_medium_confidence: 0.6
+
+  # Low KL divergence threshold
+  kl_div_low: 0.5
+  kl_div_low_score: 0.4
+  kl_div_low_confidence: 0.5
+
+  # Default score and confidence for text below low threshold
+  kl_div_default_score: 0.2
+  kl_div_default_confidence: 0.6
+
+# Burstiness detector thresholds
+# The burstiness detector measures variation in sentence length and structure
+burstiness:
+  # Minimum sentence length for burstiness analysis
+  min_sentence_length: 15
+
+  # Low coefficient of variation (consistent sentence lengths - AI-like)
+  cv_high: 0.2
+  cv_high_confidence: 0.7
+
+  # Medium coefficient of variation
+  cv_medium: 0.4
+  cv_medium_confidence: 0.6
+
+  # High coefficient of variation (variable sentence lengths - human-like)
+  cv_low: 0.6
+  cv_low_confidence: 0.5
+
+  # Default confidence when CV is very high
+  cv_default_confidence: 0.4
+
+# Repetition detector thresholds
+# The repetition detector measures n-gram repetition and self-BLEU scores
+repetition:
+  # Minimum word count for repetition analysis
+  min_word_count: 10
+
+  # Number of times an n-gram must appear to be considered repeated
+  ngram_threshold_count: 2
+
+  # Maximum number of repeated n-grams to report in metadata
+  max_reported_ngrams: 10
+
+  # Self-BLEU threshold for boosting the AI score
+  self_bleu_boost_threshold: 0.5
+  self_bleu_boost_score: 0.7
+
+  # Word count threshold for higher confidence
+  high_confidence_word_count: 50
+  high_confidence: 0.8
+  low_confidence: 0.4
+
+# Curvature detector thresholds
+# The curvature detector measures how model predictions change with perturbations
+curvature:
+  # Number of perturbations to generate for curvature analysis
+  default_n_perturbations: 10
+
+  # Masking ratio for perturbations
+  default_mask_ratio: 0.15
+
+  # Default model for perturbations
+  default_model: "EleutherAI/gpt-neo-125M"
+
+  # Maximum token length for processing
+  max_token_length: 512
+
+  # Top-k sampling parameter
+  top_k_sampling: 50
+
+  # Curvature bands: (boundary, positive_score, confidence)
+  curvature_bands:
+    - [0.05, 0.5, 0.3]
+    - [0.15, 0.55, 0.5]
+    - [0.3, 0.65, 0.6]
+    - [0.5, 0.75, 0.7]
+    - [float("inf"), 0.85, 0.8]
+
+# Surprisal detector thresholds
+# The surprisal detector measures how surprised a model is by each token
+surprisal:
+  # Default model for surprisal computation
+  default_model: "EleutherAI/gpt-neo-125M"
+
+  # Default window size for surprisal computation
+  default_window_size: 512
+
+  # Minimum number of surprisal tokens for analysis
+  min_surprisal_tokens: 5
+
+  # Variance bands: (threshold, score_increment)
+  variance_bands:
+    - [2.0, 0.25]
+    - [5.0, 0.15]
+    - [10.0, 0.05]
+
+  # Autocorrelation bands: (threshold, score_increment)
+  autocorr_bands:
+    - [0.1, 0.2]
+    - [0.3, 0.1]
+    - [0.5, 0.05]
+
+  # Burstiness bands: (threshold, score_increment)
+  burstiness_bands:
+    - [0.3, 0.2]
+    - [0.5, 0.1]
+    - [0.7, 0.05]
+
+  # Mean surprisal bands: (threshold, score_increment)
+  mean_surprisal_bands:
+    - [3.0, 0.15]
+    - [5.0, 0.1]
+    - [7.0, 0.05]
+
+  # Trend bands: (threshold, score_increment)
+  trend_bands:
+    - [0.01, 0.1]
+    - [0.05, 0.05]

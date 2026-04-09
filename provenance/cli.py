@@ -35,12 +35,19 @@ def main() -> None:
     default="weighted_average",
     help="Ensemble strategy",
 )
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=True, path_type=Path),
+    help="Optional JSON/YAML config file",
+)
 def detect(
     text: str | None,
     file: Path | None,
     output: str,
     detectors: tuple[str, ...],
     ensemble: str,
+    config_path: Path | None,
 ) -> None:
     """Detect AI-generated text in the provided text or file."""
     if file:
@@ -70,6 +77,7 @@ def detect(
     provenance = Provenance(
         detectors=detector_names,
         ensemble_strategy=strategy,
+        config=config_path,
     )
     result = provenance.detect(target_text)
 

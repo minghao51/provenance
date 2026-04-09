@@ -84,6 +84,37 @@ def compute_fpr_at_tpr_fallback(
     return float(np.interp(target_tpr, tpr_values, fpr_values))
 
 
+def compute_tpr_at_fpr_fallback(
+    y_true: list[int], y_score: list[float], target_fpr: float
+) -> float:
+    positives = sum(1 for label in y_true if label == 1)
+    negatives = sum(1 for label in y_true if label == 0)
+    if positives == 0 or negatives == 0 or len(y_true) != len(y_score):
+        return 0.0
+
+    thresholds = sorted({float(score) for score in y_score}, reverse=True)
+    thresholds.append(float("-inf"))
+    best_tpr = 0.0
+
+    for threshold in thresholds:
+        predictions = [1 if float(score) >= threshold else 0 for score in y_score]
+        tp = sum(
+            1
+            for pred, label in zip(predictions, y_true, strict=False)
+            if pred == 1 and label == 1
+        )
+        fp = sum(
+            1
+            for pred, label in zip(predictions, y_true, strict=False)
+            if pred == 1 and label == 0
+        )
+        fpr = fp / negatives
+        if fpr <= target_fpr:
+            best_tpr = max(best_tpr, tp / positives)
+
+    return best_tpr
+
+
 def compute_confusion_matrix_fallback(
     y_true: list[int], y_pred: list[int]
 ) -> dict[str, int]:

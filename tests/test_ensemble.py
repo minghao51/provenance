@@ -21,6 +21,25 @@ class DummyDetector:
         return DetectorResult(score=self._score, confidence=self._confidence)
 
 
+class FailingDetector:
+    name = "failing"
+    latency_tier = "fast"
+    domains = ["prose"]
+
+    def build_error_result(self, message: str, *, exception=None, **kwargs):
+        return DetectorResult(
+            score=0.5,
+            confidence=0.0,
+            metadata={
+                "error": message,
+                "error_type": type(exception).__name__ if exception else "unknown",
+            },
+        )
+
+    def detect(self, text: str) -> DetectorResult:
+        raise RuntimeError("detector failed")
+
+
 class TestEnsembleConfig:
     def test_default_config(self):
         config = EnsembleConfig()
@@ -75,6 +94,21 @@ class TestEnsembleWeightedAverage:
         assert result.score == 0.5
         assert result.label == "uncertain"
         assert result.confidence == 0.0
+
+    def test_weighted_average_handles_detector_failures(self):
+        ensemble = Ensemble(config=EnsembleConfig(strategy="weighted_average"))
+        working = DummyDetector(score=0.7, confidence=0.8)
+        working.name = "working"
+        ensemble.add_detector(working)
+        ensemble.add_detector(FailingDetector())
+
+        result = ensemble.ensemble_detect("test text")
+
+        assert result.score == 0.6
+        assert "failing" in result.detector_scores
+        assert result.detector_scores["failing"].metadata["error"] == (
+            "Detector execution failed"
+        )
 
 
 class TestEnsembleUncertaintyAware:

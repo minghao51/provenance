@@ -179,10 +179,17 @@ class Ensemble:
 
     def ensemble_detect(self, text: str) -> SentinelResult:
         from .base import SentinelResult
+        from .base import DetectorResult
 
         detector_scores: dict[str, DetectorResult] = {}
         for detector in self.detectors:
-            result = detector.detect(text)
+            try:
+                result = detector.detect(text)
+            except Exception as e:
+                result = detector.build_error_result(
+                    "Detector execution failed",
+                    exception=e,
+                )
             detector_scores[detector.name] = result
 
         if not detector_scores:

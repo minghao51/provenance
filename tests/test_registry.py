@@ -37,6 +37,21 @@ class TestDetectorRegistry:
         detector = self.registry.get("nonexistent")
         assert detector is None
 
+    def test_get_returns_none_when_detector_init_fails(self):
+        class BrokenDetector(BaseDetector):
+            name = "broken_detector"
+            latency_tier = "fast"
+            domains = ["prose"]
+
+            def __init__(self):
+                raise RuntimeError("boom")
+
+            def detect(self, text):
+                return DetectorResult(0.5, 0.8)
+
+        self.registry.register(BrokenDetector)
+        assert self.registry.get("broken_detector") is None
+
     def test_list_detectors_all(self):
         class Detector1(BaseDetector):
             name = "detector1"
@@ -107,6 +122,32 @@ class TestDetectorRegistry:
 
         prose = self.registry.list_detectors(domain="prose")
         assert all("prose" in d.domains for d in prose)
+
+    def test_list_detectors_skips_init_failures(self):
+        class WorkingDetector(BaseDetector):
+            name = "working_detector"
+            latency_tier = "fast"
+            domains = ["prose"]
+
+            def detect(self, text):
+                return DetectorResult(0.5, 0.8)
+
+        class BrokenDetector(BaseDetector):
+            name = "broken_detector"
+            latency_tier = "fast"
+            domains = ["prose"]
+
+            def __init__(self):
+                raise RuntimeError("boom")
+
+            def detect(self, text):
+                return DetectorResult(0.5, 0.8)
+
+        self.registry.register(WorkingDetector)
+        self.registry.register(BrokenDetector)
+
+        detectors = self.registry.list_detectors()
+        assert [det.name for det in detectors] == ["working_detector"]
 
     def test_clear(self):
         class TestDetector(BaseDetector):

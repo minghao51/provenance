@@ -1,0 +1,40 @@
+{
+  "curvature": {
+    "before": {
+      "accuracy": 0.8666666666666667,
+      "f1": 0.9285714285714286,
+      "precision": 0.8666666666666667,
+      "recall": 1.0,
+      "auroc": 0.38461538461538464,
+      "auprc": 0.8393162393162393,
+      "fpr_at_10tpr": 1.0,
+      "fpr_at_20tpr": 1.0,
+      "confusion_matrix": {
+        "tn": 0,
+        "fp": 4,
+        "fn": 0,
+        "tp": 26
+      },
+      "name": "heuristic"
+    },
+    "after": {
+      "accuracy": 0.9,
+      "f1": 0.9411764705882353,
+      "precision": 0.96,
+      "recall": 0.9230769230769231,
+      "auroc": 0.7788461538461539,
+      "auprc": 0.9246621232469183,
+      "fpr_at_10tpr": 0.25,
+      "fpr_at_20tpr": 0.25,
+      "confusion_matrix": {
+        "tn": 3,
+        "fp": 1,
+        "fn": 2,
+        "tp": 24
+      },
+      "name": "calibrated"
+    },
+    "delta_auroc": 0.3942307692307692,
+    "delta_f1": 0.012605042016806678
+  }
+}

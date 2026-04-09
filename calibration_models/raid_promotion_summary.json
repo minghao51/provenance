@@ -1,0 +1,35 @@
+{
+  "dataset": "raid",
+  "policy": {
+    "max_f1_regression": 0.0,
+    "min_auroc_improvement": 0.01,
+    "min_tpr_at_1fpr_improvement": null
+  },
+  "rejected_models": {
+    "entropy": {
+      "after": {
+        "auroc": 0.3848,
+        "f1": 0.9189
+      },
+      "before": {
+        "auroc": 0.5,
+        "f1": 0.9189
+      },
+      "delta": {
+        "auroc": -0.1152,
+        "f1": 0.0
+      },
+      "model_path": "calibration_models/entropy_raid.pkl",
+      "reasons": [
+        "delta_auroc -0.1152 below threshold 0.0100"
+      ]
+    }
+  },
+  "selected_models": {
+    "burstiness": "calibration_models/burstiness_raid.pkl",
+    "curvature_detectgpt": "calibration_models/curvature_raid.pkl",
+    "repetition": "calibration_models/repetition_raid.pkl",
+    "surprisal_diveye": "calibration_models/surprisal_raid.pkl"
+  },
+  "source_summary": "calibration_models/raid_calibration_summary.json"
+}

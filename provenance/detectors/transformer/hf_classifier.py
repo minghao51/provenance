@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from provenance.core.base import BaseDetector, DetectorResult, TokenScore
+from provenance.core.errors import DetectorInitError
 
 try:
     import torch
@@ -47,7 +48,7 @@ class HuggingFaceClassifierDetector(BaseDetector):
         max_length: int = 512,
     ):
         if AutoModelForSequenceClassification is None:
-            raise ImportError(
+            raise DetectorInitError(
                 "transformers is required for HuggingFaceClassifierDetector"
             )
         assert AutoModelForSequenceClassification is not None
@@ -60,15 +61,20 @@ class HuggingFaceClassifierDetector(BaseDetector):
         self.truncation = truncation
         self.max_length = max_length
 
-        self.classifier = pipeline(
-            "text-classification",
-            model=self.model_id,
-            device=0 if self.device == "cuda" else -1,
-            truncation=truncation,
-            max_length=max_length,
-        )
-        self.model = self.classifier.model
-        self.tokenizer = self.classifier.tokenizer
+        try:
+            self.classifier = pipeline(
+                "text-classification",
+                model=self.model_id,
+                device=0 if self.device == "cuda" else -1,
+                truncation=truncation,
+                max_length=max_length,
+            )
+            self.model = self.classifier.model
+            self.tokenizer = self.classifier.tokenizer
+        except Exception as e:
+            raise DetectorInitError(
+                f"Failed to initialize HuggingFace model '{self.model_id}': {e}"
+            ) from e
 
     def detect(self, text: str) -> DetectorResult:
         result = self.classifier(text)[0]

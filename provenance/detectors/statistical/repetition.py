@@ -9,20 +9,24 @@ from functools import lru_cache
 
 from provenance.core.base import BaseDetector, DetectorResult
 from provenance.core.calibration import CalibratedDetectorMixin
+from provenance.core.config import RepetitionThresholds
 
 
 class RepetitionDetector(CalibratedDetectorMixin, BaseDetector):
     name = "repetition"
     latency_tier = "fast"
     domains = ["prose", "academic"]
+    calibration_aliases = ("repetition",)
 
     def __init__(
         self,
         ngram_sizes: tuple[int, ...] = (3, 4),
         repetition_threshold: float = 0.3,
+        thresholds: RepetitionThresholds | None = None,
     ):
         self.ngram_sizes = ngram_sizes
         self.repetition_threshold = repetition_threshold
+        self.thresholds = thresholds or RepetitionThresholds()
 
     def _get_ngrams(self, words: Sequence[str], n: int) -> list[tuple[str, ...]]:
         if len(words) < n:
@@ -93,7 +97,7 @@ class RepetitionDetector(CalibratedDetectorMixin, BaseDetector):
                 continue
 
             ngram_counts = Counter(ngrams)
-            threshold_count = 2
+            threshold_count = self.thresholds.ngram_threshold_count
 
             for ngram, count in ngram_counts.items():
                 if count >= threshold_count:
@@ -102,7 +106,7 @@ class RepetitionDetector(CalibratedDetectorMixin, BaseDetector):
                     repeated.append((ngram_str, ratio))
 
         repeated.sort(key=lambda x: x[1], reverse=True)
-        return repeated[:10]
+        return repeated[: self.thresholds.max_reported_ngrams]
 
     def _extract_features(self, text: str) -> list[float]:
         words = tuple(re.findall(r"\b[a-zA-Z]+\b", text.lower()))
@@ -124,51 +128,62 @@ class RepetitionDetector(CalibratedDetectorMixin, BaseDetector):
         return names
 
     def detect(self, text: str) -> DetectorResult:
-        words = re.findall(r"\b[a-zA-Z]+\b", text.lower())
-        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+        try:
+            words = re.findall(r"\b[a-zA-Z]+\b", text.lower())
+            paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
 
-        if len(words) < 10:
+            if len(words) < self.thresholds.min_word_count:
+                return self.build_error_result("Text too short for repetition analysis")
+
+            words_tuple = tuple(words)
+            ngram_repetitions = {}
+            for n in self.ngram_sizes:
+                ratio = self._compute_ngram_repetition_ratio(words_tuple, n)
+                ngram_repetitions[f"ngram_{n}_repetition"] = ratio
+
+            self_bleu = (
+                self._compute_self_bleu(paragraphs) if len(paragraphs) >= 2 else 0.0
+            )
+            repeated_ngrams = self._detect_repeated_ngrams(words)
+
+            calibrated = self._get_calibrated_score(text)
+            if calibrated is not None:
+                score, confidence = calibrated
+            else:
+                max_repetition = (
+                    max(ngram_repetitions.values()) if ngram_repetitions else 0.0
+                )
+                repetition_score = max_repetition
+
+                if self_bleu > self.thresholds.self_bleu_boost_threshold:
+                    repetition_score = max(
+                        repetition_score,
+                        self.thresholds.self_bleu_boost_score,
+                    )
+
+                score = min(1.0, repetition_score)
+                confidence = (
+                    self.thresholds.high_confidence
+                    if len(words) > self.thresholds.high_confidence_word_count
+                    else self.thresholds.low_confidence
+                )
+
             return DetectorResult(
-                score=0.5,
-                confidence=0.0,
-                metadata={"error": "Text too short for repetition analysis"},
+                score=score,
+                confidence=confidence,
+                metadata={
+                    **ngram_repetitions,
+                    "self_bleu": self_bleu,
+                    "repeated_ngrams": repeated_ngrams[:5],
+                    "paragraph_count": len(paragraphs),
+                    "calibrated": calibrated is not None,
+                },
             )
-
-        words_tuple = tuple(words)
-        ngram_repetitions = {}
-        for n in self.ngram_sizes:
-            ratio = self._compute_ngram_repetition_ratio(words_tuple, n)
-            ngram_repetitions[f"ngram_{n}_repetition"] = ratio
-
-        self_bleu = self._compute_self_bleu(paragraphs) if len(paragraphs) >= 2 else 0.0
-        repeated_ngrams = self._detect_repeated_ngrams(words)
-
-        calibrated = self._get_calibrated_score(text)
-        if calibrated is not None:
-            score, confidence = calibrated
-        else:
-            max_repetition = (
-                max(ngram_repetitions.values()) if ngram_repetitions else 0.0
+        except Exception as e:
+            return self.build_error_result(
+                "Repetition analysis failed",
+                exception=e,
             )
-            repetition_score = max_repetition
-
-            if self_bleu > 0.5:
-                repetition_score = max(repetition_score, 0.7)
-
-            score = min(1.0, repetition_score)
-            confidence = 0.8 if len(words) > 50 else 0.4
-
-        return DetectorResult(
-            score=score,
-            confidence=confidence,
-            metadata={
-                **ngram_repetitions,
-                "self_bleu": self_bleu,
-                "repeated_ngrams": repeated_ngrams[:5],
-                "paragraph_count": len(paragraphs),
-                "calibrated": calibrated is not None,
-            },
-        )
 
 
 def register(registry=None) -> None:
