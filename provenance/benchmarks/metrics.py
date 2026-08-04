@@ -50,7 +50,8 @@ def compute_auprc_fallback(y_true: list[int], y_score: list[float]) -> float:
 
     precisions.append(0.0)
     recalls.append(1.0)
-    return float(np.trapz(precisions, recalls))
+    trapz_fn = getattr(np, "trapezoid", np.trapz)
+    return float(trapz_fn(precisions, recalls))
 
 
 def compute_fpr_at_tpr_fallback(

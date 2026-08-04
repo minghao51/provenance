@@ -2,15 +2,15 @@
 
 from pathlib import Path
 
-from click.testing import CliRunner
 import pytest
+from click.testing import CliRunner
 
 from provenance import Provenance
 from provenance.cli import main
 from provenance.core.base import BaseDetector, DetectorResult
 from provenance.core.config import ProvenanceConfig
-from provenance.core.registry import get_registry
 from provenance.core.ensemble import Ensemble, EnsembleConfig
+from provenance.core.registry import get_registry
 from provenance.detectors.statistical.burstiness import BurstinessDetector
 from provenance.detectors.statistical.entropy import EntropyDetector
 from provenance.detectors.statistical.repetition import RepetitionDetector
@@ -297,3 +297,216 @@ class TestProvenanceFacade:
         assert hasattr(result, "score")
         assert hasattr(result, "label")
         assert 0.0 <= result.score <= 1.0
+
+
+class TestCalibrationDetectionPipeline:
+    """Full pipeline: calibration → detection → reporting."""
+
+    def test_pipeline_with_entropy_detector(self, sample_human_text):
+        detector = EntropyDetector()
+        features = detector._extract_features(sample_human_text)
+        assert len(features) == 2
+        assert all(isinstance(f, float) for f in features)
+
+        result = detector.detect(sample_human_text)
+        assert 0.0 <= result.score <= 1.0
+        assert 0.0 <= result.confidence <= 1.0
+        assert "text_entropy" in result.metadata
+        assert "kl_divergence" in result.metadata
+        assert "calibrated" in result.metadata
+
+    def test_pipeline_with_repetition_detector(self, sample_human_text):
+        detector = RepetitionDetector()
+        features = detector._extract_features(sample_human_text)
+        assert len(features) > 0
+
+        result = detector.detect(sample_human_text)
+        assert 0.0 <= result.score <= 1.0
+        assert 0.0 <= result.confidence <= 1.0
+
+    def test_pipeline_with_burstiness_detector(self, sample_human_text):
+        detector = BurstinessDetector()
+        result = detector.detect(sample_human_text)
+        assert 0.0 <= result.score <= 1.0
+        assert 0.0 <= result.confidence <= 1.0
+        assert "burstiness_cv" in result.metadata
+
+    def test_pipeline_feature_extraction_then_detection(self, sample_ai_text):
+        detector = EntropyDetector()
+        features = detector._extract_features(sample_ai_text)
+        names = detector._extract_feature_names()
+        assert len(features) == len(names)
+
+        result = detector.detect(sample_ai_text)
+        assert "text_entropy" in result.metadata
+        assert "kl_divergence" in result.metadata
+
+    def test_pipeline_all_detectors_produce_consistent_results(self, sample_human_text):
+        detectors = [EntropyDetector(), RepetitionDetector(), BurstinessDetector()]
+        for detector in detectors:
+            result = detector.detect(sample_human_text)
+            assert 0.0 <= result.score <= 1.0
+            assert 0.0 <= result.confidence <= 1.0
+            assert isinstance(result.metadata, dict)
+
+
+class TestEnsembleFullPipeline:
+    """Test ensemble with multiple detectors end-to-end."""
+
+    def test_ensemble_combines_entropy_and_repetition(self):
+        config = EnsembleConfig(strategy="weighted_average")
+        ensemble = Ensemble(config=config)
+        ensemble.add_detector(EntropyDetector())
+        ensemble.add_detector(RepetitionDetector())
+
+        text = (
+            "The quick brown fox jumps over the lazy dog. "
+            "This sentence contains every letter of the alphabet. "
+            "Scientists have studied this phenomenon extensively."
+        )
+        result = ensemble.ensemble_detect(text)
+
+        assert 0.0 <= result.score <= 1.0
+        assert result.label in ("human", "ai", "mixed", "uncertain")
+        assert "entropy" in result.detector_scores
+        assert "repetition" in result.detector_scores
+
+    def test_ensemble_three_detectors_weighted_average(self):
+        config = EnsembleConfig(strategy="weighted_average")
+        ensemble = Ensemble(config=config)
+        ensemble.add_detector(EntropyDetector())
+        ensemble.add_detector(RepetitionDetector())
+        ensemble.add_detector(BurstinessDetector())
+
+        text = (
+            "Artificial intelligence has transformed many industries. "
+            "Machine learning models can generate human-like text. "
+            "Detection systems help identify AI-generated content. "
+            "These tools are becoming increasingly important."
+        )
+        result = ensemble.ensemble_detect(text)
+
+        assert 0.0 <= result.score <= 1.0
+        assert 0.0 <= result.confidence <= 1.0
+        assert len(result.detector_scores) == 3
+
+    def test_ensemble_uncertainty_aware_with_statistical(self):
+        config = EnsembleConfig(strategy="uncertainty_aware", confidence_threshold=0.5)
+        ensemble = Ensemble(config=config)
+        ensemble.add_detector(EntropyDetector())
+        ensemble.add_detector(RepetitionDetector())
+
+        text = (
+            "The implementation of neural networks requires careful tuning. "
+            "Hyperparameter optimization is crucial for model performance."
+        )
+        result = ensemble.ensemble_detect(text)
+
+        assert 0.0 <= result.score <= 1.0
+        assert result.label in ("human", "ai", "mixed", "uncertain")
+
+    def test_ensemble_detector_failure_isolation(self):
+        from provenance.core.base import BaseDetector, DetectorResult
+
+        class FailingStatistical(BaseDetector):
+            name = "failing_stat"
+            latency_tier = "fast"
+            domains = ["prose"]
+
+            def detect(self, text: str) -> DetectorResult:
+                raise RuntimeError("statistical detector crash")
+
+        config = EnsembleConfig(strategy="weighted_average")
+        ensemble = Ensemble(config=config)
+        ensemble.add_detector(EntropyDetector())
+        ensemble.add_detector(FailingStatistical())
+
+        text = "A reasonably long sentence for ensemble testing purposes."
+        result = ensemble.ensemble_detect(text)
+
+        assert 0.0 <= result.score <= 1.0
+        assert "failing_stat" in result.detector_scores
+        assert "error" in result.detector_scores["failing_stat"].metadata
+
+
+class TestSentinelEndToEnd:
+    """End-to-end tests: Provenance facade with registered statistical detectors."""
+
+    def setup_method(self):
+        self.registry = get_registry()
+        self.registry.clear()
+
+    def teardown_method(self):
+        self.registry.clear()
+
+    def test_sentinel_with_explicit_statistical_detectors(self):
+        provenance = Provenance(
+            detectors=["entropy", "repetition"],
+            config=ProvenanceConfig(min_text_length=1),
+        )
+        text = (
+            "The quick brown fox jumps over the lazy dog. "
+            "Scientists have studied animal behavior for decades. "
+            "Recent advances in machine learning have enabled new discoveries."
+        )
+        result = provenance.detect(text)
+
+        assert hasattr(result, "score")
+        assert hasattr(result, "label")
+        assert hasattr(result, "confidence")
+        assert 0.0 <= result.score <= 1.0
+        assert result.label in ("human", "ai", "mixed", "uncertain")
+
+    def test_sentinel_heatmap_populated(self):
+        provenance = Provenance(
+            detectors=["entropy"],
+            config=ProvenanceConfig(min_text_length=1),
+        )
+        long_text = (
+            "The quick brown fox jumps over the lazy dog. "
+            "This is a longer text that should produce heatmap data. "
+            "Multiple sentences help ensure proper processing. "
+            "The detection system analyzes each token individually. "
+            "Heatmaps provide visual explanations of the results. "
+        ) * 3
+        result = provenance.detect(long_text)
+
+        assert isinstance(result.heatmap, list)
+
+    def test_sentinel_sentence_scores_populated(self):
+        provenance = Provenance(
+            detectors=["entropy"],
+            config=ProvenanceConfig(min_text_length=1),
+        )
+        text = (
+            "First sentence about something interesting. "
+            "Second sentence continues the thought with more detail. "
+            "Third sentence provides additional context and information. "
+            "Fourth sentence wraps up the paragraph nicely. "
+            "Fifth sentence adds one more thought. "
+        ) * 5
+        result = provenance.detect(text)
+
+        assert isinstance(result.sentence_scores, list)
+
+    def test_sentinel_short_text_returns_uncertain(self):
+        provenance = Provenance(
+            detectors=["entropy"],
+            config=ProvenanceConfig(min_text_length=150),
+        )
+        result = provenance.detect("This is short.")
+        assert result.label == "uncertain"
+        assert result.confidence <= 0.5
+
+    def test_sentinel_audit_with_statistical(self):
+        provenance = Provenance(
+            detectors=["entropy"],
+            config=ProvenanceConfig(min_text_length=1),
+        )
+        texts = [
+            "Human written text with varied structure and colloquial language.",
+            "The implementation demonstrates optimal configurations for parameters.",
+        ]
+        labels = [0, 1]
+        result = provenance.audit(texts=texts, labels=labels)
+        assert isinstance(result, dict)

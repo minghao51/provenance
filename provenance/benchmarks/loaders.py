@@ -134,14 +134,14 @@ class HuggingFaceDatasetLoader:
         sample_limit: int | None,
         seed: int,
     ) -> tuple[list[str], list[int], list[dict]]:
-        np.random.seed(seed)
+        rng = np.random.default_rng(seed)
 
         if sample_limit and sample_limit < len(texts):
-            indices = np.random.choice(len(texts), sample_limit, replace=False)
+            indices = rng.choice(len(texts), sample_limit, replace=False)
         elif sample_limit is None and len(texts) > 10000:
-            indices = np.random.choice(len(texts), 10000, replace=False)
+            indices = rng.choice(len(texts), 10000, replace=False)
         else:
-            indices = np.random.permutation(len(texts))
+            indices = rng.permutation(len(texts))
 
         return (
             [texts[i] for i in indices],

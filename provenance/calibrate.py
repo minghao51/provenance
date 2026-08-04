@@ -1,5 +1,32 @@
 """Calibration training script for all detectors using benchmark datasets.
 
+Calibration models are serialized via joblib pickle. When loading, the
+CalibratedDetectorMixin.load_calibration() method uses ``joblib.load()``
+which deserializes arbitrary Python objects — a potential security risk if
+model files are tampered with.
+
+HMAC Signing (planned):
+    Future releases will HMAC-sign calibration artifacts to verify integrity
+    at load time. This requires the ``PROVENANCE_HMAC_KEY`` environment variable
+    to be set with a shared secret key.
+
+Environment Variables:
+    PROVENANCE_HMAC_KEY:
+        Hex-encoded HMAC key used to sign/verify calibration model files.
+        Generate one with::
+
+            python -c "import secrets; print(secrets.token_hex(32))"
+
+        If not set when HMAC verification is active, loading calibration
+        models will fail with a clear error message.
+
+    PROVENANCE_DISABLE_AUTO_CALIBRATION:
+        Set to ``1`` to skip auto-loading of calibration models at detector
+        initialization.
+
+    PROVENANCE_CALIBRATION_DIR:
+        Override the default directory searched for calibration model files.
+
 Usage:
     uv run python -m provenance.calibrate train --detector entropy --dataset hc3 --limit 500
     uv run python -m provenance.calibrate train --detector all --dataset hc3 --limit 1000

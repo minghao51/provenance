@@ -1,9 +1,21 @@
 """Tests for provenance.Provenance facade."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from provenance import Provenance
+from provenance.core.base import BaseDetector, DetectorResult
 from provenance.core.registry import DetectorRegistry
+
+
+class StubDetector(BaseDetector):
+    name = "stub_detector"
+    latency_tier = "fast"
+    domains = ["prose"]
+
+    def detect(self, text: str) -> DetectorResult:
+        return DetectorResult(score=0.7, confidence=0.8)
 
 
 class TestProvenance:
@@ -15,19 +27,14 @@ class TestProvenance:
         self.registry.clear()
 
     def test_provenance_init_default_detectors(self):
-        try:
-            provenance = Provenance()
-            assert provenance.preprocessor is not None
-            assert provenance.ensemble is not None
-        except Exception:
-            pytest.skip("Detectors not registered via entry points")
+        provenance = Provenance()
+        assert provenance.preprocessor is not None
+        assert provenance.ensemble is not None
 
-    def test_provenance_init_specific_detectors(self):
-        try:
-            provenance = Provenance(detectors=[])
-            assert provenance.ensemble is not None
-        except Exception:
-            pass
+    def test_provenance_init_empty_detectors(self):
+        provenance = Provenance(detectors=[])
+        assert provenance.ensemble is not None
+        assert len(provenance.ensemble.detectors) == 0
 
     def test_provenance_init_with_strategy(self):
         provenance = Provenance(ensemble_strategy="uncertainty_aware")
@@ -68,6 +75,16 @@ class TestProvenance:
         result = provenance.detect(long_text)
         assert result.score is not None
         assert 0.0 <= result.score <= 1.0
+
+    def test_provenance_detect_with_registered_detector(self):
+        self.registry.register(StubDetector)
+        provenance = Provenance(detectors=["stub_detector"])
+        assert len(provenance.ensemble.detectors) == 1
+        words = ["word"] * 200
+        long_text = " ".join(words)
+        result = provenance.detect(long_text)
+        assert result.score == pytest.approx(0.7)
+        assert "stub_detector" in result.detector_scores
 
     def test_provenance_audit_method_exists(self):
         provenance = Provenance(detectors=[])

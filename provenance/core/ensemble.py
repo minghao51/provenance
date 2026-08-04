@@ -54,6 +54,8 @@ class Ensemble:
             return self._compute_average_score(detector_scores)
 
         total_weight = sum(weights.get(name, 1.0) for name in detector_scores)
+        if total_weight == 0:
+            return self._compute_average_score(detector_scores)
         weighted_sum = sum(
             detector_scores[name].score * weights.get(name, 1.0)
             for name in detector_scores

@@ -27,10 +27,11 @@ classifiers = [
 requires-python = ">=3.10,<3.14"
 dependencies = [
     "spacy>=3.7",
-    "langdetect",
-    "numpy",
-    "scipy",
+    "langdetect>=1.0.9",
+    "numpy>=1.24,<2",
+    "scipy>=1.10",
     "click>=8.0",
+    "slowapi>=0.1.9",
 ]
 
 [project.optional-dependencies]
@@ -74,9 +75,10 @@ serve = [
 ]
 all = [
     "spacy>=3.7",
-    "langdetect",
-    "numpy",
-    "scipy",
+    "langdetect>=1.0.9",
+    "numpy>=1.24,<2",
+    "scipy>=1.10",
+    "slowapi>=0.1.9",
     "datasets",
     "transformers>=4.35",
     "torch>=2.0",
@@ -126,8 +128,7 @@ line-length = 88
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM"]
-ignore = ["E501"]
+select = ["E", "F", "W", "I", "N", "UP", "B", "B019", "C4", "SIM"]
 
 [tool.mypy]
 python_version = "3.10"

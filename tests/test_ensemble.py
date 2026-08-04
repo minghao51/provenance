@@ -1,5 +1,7 @@
 """Tests for sentinel.core.ensemble module."""
 
+import pytest
+
 from provenance.core.base import DetectorResult
 from provenance.core.ensemble import (
     Ensemble,
@@ -153,12 +155,9 @@ class TestEnsembleStacking:
         ensemble.add_detector(DummyDetector(score=0.3, confidence=0.8))
         ensemble.add_detector(DummyDetector(score=0.7, confidence=0.8))
 
-        try:
-            ensemble.calibrate(texts, labels, method="platt")
-            result = ensemble.ensemble_detect("test text")
-            assert 0.0 <= result.score <= 1.0
-        except Exception:
-            pass
+        ensemble.calibrate(texts, labels, method="platt")
+        result = ensemble.ensemble_detect("test text")
+        assert 0.0 <= result.score <= 1.0
 
 
 class TestLabelDetermination:
@@ -166,19 +165,66 @@ class TestLabelDetermination:
         ensemble = Ensemble(config=EnsembleConfig(strategy="weighted_average"))
         ensemble.add_detector(DummyDetector(score=0.1, confidence=0.9))
         result = ensemble.ensemble_detect("test text")
-        assert result.label in ["human", "ai", "mixed", "uncertain"]
+        assert result.label == "human"
 
     def test_label_ai(self):
         ensemble = Ensemble(config=EnsembleConfig(strategy="weighted_average"))
         ensemble.add_detector(DummyDetector(score=0.9, confidence=0.9))
         result = ensemble.ensemble_detect("test text")
-        assert result.label in ["human", "ai", "mixed", "uncertain"]
+        assert result.label == "ai"
 
     def test_label_uncertain_low_confidence(self):
         ensemble = Ensemble(config=EnsembleConfig(strategy="weighted_average"))
         ensemble.add_detector(DummyDetector(score=0.5, confidence=0.1))
         result = ensemble.ensemble_detect("test text")
         assert result.label == "uncertain"
+
+    def test_label_mixed(self):
+        ensemble = Ensemble(config=EnsembleConfig(strategy="weighted_average"))
+        ensemble.add_detector(DummyDetector(score=0.5, confidence=0.7))
+        result = ensemble.ensemble_detect("test text")
+        assert result.label == "mixed"
+
+
+class TestEdgeCases:
+    def test_single_detector(self):
+        ensemble = Ensemble(config=EnsembleConfig(strategy="weighted_average"))
+        det = DummyDetector(score=0.8, confidence=0.9)
+        det.name = "solo"
+        ensemble.add_detector(det)
+        result = ensemble.ensemble_detect("test text")
+        assert result.score == 0.8
+        assert "solo" in result.detector_scores
+
+    def test_zero_weights_falls_back_to_uniform(self):
+        det1 = DummyDetector(score=0.3)
+        det1.name = "a"
+        det2 = DummyDetector(score=0.7)
+        det2.name = "b"
+        ensemble = Ensemble(
+            config=EnsembleConfig(
+                strategy="weighted_average",
+                weights={"a": 0.0, "b": 0.0},
+            )
+        )
+        ensemble.add_detector(det1)
+        ensemble.add_detector(det2)
+        result = ensemble.ensemble_detect("test text")
+        assert result.score == pytest.approx(0.5, abs=0.01)
+
+    def test_empty_input_text(self):
+        ensemble = Ensemble(config=EnsembleConfig(strategy="weighted_average"))
+        ensemble.add_detector(DummyDetector(score=0.5, confidence=0.5))
+        result = ensemble.ensemble_detect("")
+        assert 0.0 <= result.score <= 1.0
+
+    def test_all_detectors_fail(self):
+        ensemble = Ensemble(config=EnsembleConfig(strategy="weighted_average"))
+        ensemble.add_detector(FailingDetector())
+        ensemble.add_detector(FailingDetector())
+        result = ensemble.ensemble_detect("test text")
+        assert result.score == 0.5
+        assert result.confidence == 0.0
 
 
 class TestConfidenceInterval:

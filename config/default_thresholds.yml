@@ -85,12 +85,16 @@ curvature:
   top_k_sampling: 50
 
   # Curvature bands: (boundary, positive_score, confidence)
+  # Each band sets the AI score and confidence when the curvature value
+  # is >= the previous band boundary and < this band's boundary.
+  # The last entry uses float("inf") as an open-ended catch-all for
+  # any curvature value >= 0.5 — these are strong AI signals.
   curvature_bands:
-    - [0.05, 0.5, 0.3]
-    - [0.15, 0.55, 0.5]
-    - [0.3, 0.65, 0.6]
-    - [0.5, 0.75, 0.7]
-    - [float("inf"), 0.85, 0.8]
+    - [0.05, 0.5, 0.3]          # very low curvature: weak/uncertain signal
+    - [0.15, 0.55, 0.5]         # mild curvature
+    - [0.3, 0.65, 0.6]          # moderate curvature
+    - [0.5, 0.75, 0.7]          # strong curvature
+    - [float("inf"), 0.85, 0.8] # catch-all: any value >= 0.5
 
 # Surprisal detector thresholds
 # The surprisal detector measures how surprised a model is by each token

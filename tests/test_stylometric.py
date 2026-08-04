@@ -18,41 +18,31 @@ class TestFeatureExtractor:
     def test_extract_surface_features(self):
         text = "The quick brown fox jumps over the lazy dog. This sentence is used for testing."
         features = self.extractor.extract(text)
-        surface_keys = [
-            k
-            for k in features
-            if "flesch" in k
-            or "fog" in k
-            or "sentence_length" in k
-            or "word_length" in k
-        ]
-        assert len(surface_keys) >= 0
+        assert "flesch_kincaid_grade" in features
+        assert "gunning_fog_index" in features
+        assert "avg_sentence_length" in features
+        assert "avg_word_length" in features
 
     def test_extract_lexical_features(self):
         text = "The quick brown fox jumps over the lazy dog. This sentence is used for testing."
         features = self.extractor.extract(text)
-        lexical_keys = [
-            k for k in features if "ttr" in k or "yule" in k or "hapax" in k
-        ]
-        assert len(lexical_keys) >= 0
+        assert "ttr" in features
+        assert "yules_k" in features
+        assert "hapax_ratio" in features
 
     def test_extract_syntactic_features(self):
         text = "The quick brown fox jumps over the lazy dog. This sentence is used for testing."
         features = self.extractor.extract(text)
-        syntactic_keys = [
-            k for k in features if "pos" in k or "dependency" in k or "passive" in k
-        ]
-        assert len(syntactic_keys) >= 0
+        assert "pos_diversity" in features
+        assert "dep_depth_mean" in features
+        assert "passive_ratio" in features
 
     def test_extract_stylistic_features(self):
         text = "Furthermore, the results indicate that, on the other hand, we may conclude."
         features = self.extractor.extract(text)
-        stylistic_keys = [
-            k
-            for k in features
-            if "transition" in k or "function_word" in k or "punctuation" in k
-        ]
-        assert len(stylistic_keys) >= 0
+        assert "transition_phrase_freq" in features
+        assert "function_word_ratio" in features
+        assert "punctuation_comma_ratio" in features
 
     def test_to_vector(self):
         text = "This is a sample text for testing the feature extractor."

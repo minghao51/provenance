@@ -6,6 +6,7 @@ import re
 
 from provenance.core.base import BaseDetector, DetectorResult
 from provenance.core.calibration import CalibratedDetectorMixin
+from provenance.core.text_utils import tokenize_words
 
 try:
     from transformers import pipeline
@@ -28,9 +29,6 @@ class AcademicDetector(CalibratedDetectorMixin, BaseDetector):
         r"\d{4}\)",
         r"[A-Z]\.\s*[A-Z]\.",
     ]
-
-    def __init__(self):
-        self.citation_model = None
 
     def _extract_citations(self, text: str) -> list[str]:
         citations = []
@@ -65,7 +63,7 @@ class AcademicDetector(CalibratedDetectorMixin, BaseDetector):
         }
 
     def _analyze_language_complexity(self, text: str) -> dict[str, float]:
-        words = re.findall(r"\b[a-zA-Z]+\b", text)
+        words = tokenize_words(text)
         if not words:
             return {"avg_word_length": 0, "latin_abbreviation_ratio": 0}
 
@@ -157,6 +155,12 @@ class AcademicDetector(CalibratedDetectorMixin, BaseDetector):
         ]
 
     def detect(self, text: str) -> DetectorResult:
+        if self._is_short_text(text):
+            return self.build_error_result(
+                "Text too short for academic analysis",
+                score=0.5,
+                confidence=0.0,
+            )
         citations = self._extract_citations(text)
         citation_analysis = self._check_citation_formatting(citations)
         complexity = self._analyze_language_complexity(text)

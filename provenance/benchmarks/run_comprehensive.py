@@ -1,4 +1,9 @@
-"""Comprehensive benchmark comparing all detectors on RAID and MAGE datasets."""
+"""Comprehensive benchmark comparing all detectors.
+
+By default, runs only on the RAID dataset. MAGE is available in the
+DatasetRegistry but is not included in the default run list — add it
+by modifying ``datasets_to_run`` if needed.
+"""
 
 from __future__ import annotations
 

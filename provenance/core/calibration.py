@@ -23,6 +23,8 @@ except ImportError:
     StandardScaler = None
     SKLEARN_AVAILABLE = False
 
+SHORT_TEXT_MIN_LENGTH = 50
+
 
 class CalibratedDetectorMixin:
     """Mixin that adds calibration support to any detector.
@@ -112,6 +114,19 @@ class CalibratedDetectorMixin:
         score = float(proba[1])
         confidence = float(max(proba))
         return score, confidence
+
+    def _resolve_score(
+        self,
+        text: str,
+        heuristic_fn,
+    ) -> tuple[float, float]:
+        calibrated = self._get_calibrated_score(text)
+        if calibrated is not None:
+            return calibrated
+        return heuristic_fn(text)
+
+    def _is_short_text(self, text: str) -> bool:
+        return len(text) < SHORT_TEXT_MIN_LENGTH
 
     def save_calibration(self, path: str | Path) -> None:
         """Save calibration model to disk."""

@@ -9,14 +9,6 @@ from collections import Counter
 from provenance.core.base import BaseDetector, DetectorResult
 from provenance.core.calibration import CalibratedDetectorMixin
 
-try:
-    import tree_sitter
-    from tree_sitter import Parser
-except ImportError:
-    tree_sitter = None
-    Parser = None
-
-
 class CodeDetector(CalibratedDetectorMixin, BaseDetector):
     name = "code_detector"
     latency_tier = "medium"
@@ -37,10 +29,7 @@ class CodeDetector(CalibratedDetectorMixin, BaseDetector):
         "res",
     }
 
-    def __init__(self):
-        self.nlp = None
-
-    def _compute_ast_features(self, code: str, language: str) -> dict[str, float]:
+    def _compute_ast_features(self, code: str, language: str = "python") -> dict[str, float]:
         features: dict[str, float] = {}
 
         try:
@@ -144,10 +133,11 @@ class CodeDetector(CalibratedDetectorMixin, BaseDetector):
         logical_complexity = self._compute_logical_complexity(text)
 
         if ast_features.get("function_count", 0) == 0:
-            return DetectorResult(
+            return self.build_error_result(
+                "Could not parse as code",
                 score=0.5,
                 confidence=0.3,
-                metadata={"error": "Could not parse as code", "features": ast_features},
+                metadata={"features": ast_features},
             )
 
         calibrated = self._get_calibrated_score(text)

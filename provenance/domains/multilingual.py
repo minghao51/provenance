@@ -7,6 +7,7 @@ from collections import Counter
 
 from provenance.core.base import BaseDetector, DetectorResult
 from provenance.core.calibration import CalibratedDetectorMixin
+from provenance.core.text_utils import split_sentences
 
 try:
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
@@ -45,10 +46,6 @@ class MultilingualDetector(CalibratedDetectorMixin, BaseDetector):
         "cyrillic": 0.35,
         "semitic": 0.30,
     }
-
-    def __init__(self):
-        self.model = None
-        self.tokenizer = None
 
     def _detect_language(self, text: str) -> tuple[str, float]:
         try:
@@ -101,8 +98,7 @@ class MultilingualDetector(CalibratedDetectorMixin, BaseDetector):
             features["avg_word_length"] = 0
             features["word_length_variance"] = 0
 
-        sentences = re.split(r"[.!?]+", text)
-        sentences = [s.strip() for s in sentences if s.strip()]
+        sentences = split_sentences(text)
         if sentences:
             sentence_lengths = [len(s.split()) for s in sentences]
             mean_sentence_length = sum(sentence_lengths) / len(sentence_lengths)
@@ -120,8 +116,7 @@ class MultilingualDetector(CalibratedDetectorMixin, BaseDetector):
     def _estimate_burstiness_adapted(self, text: str, family: str) -> float:
         threshold = self.BURSTINESS_THRESHOLDS.get(family, 0.35)
 
-        sentences = re.split(r"[.!?]+", text)
-        sentences = [s.strip() for s in sentences if s.strip() and len(s) > 10]
+        sentences = [s for s in split_sentences(text) if len(s) > 10]
 
         if len(sentences) < 2:
             return threshold
@@ -162,11 +157,11 @@ class MultilingualDetector(CalibratedDetectorMixin, BaseDetector):
         ]
 
     def detect(self, text: str) -> DetectorResult:
-        if len(text) < 50:
-            return DetectorResult(
+        if self._is_short_text(text):
+            return self.build_error_result(
+                "Text too short for multilingual analysis",
                 score=0.5,
                 confidence=0.0,
-                metadata={"error": "Text too short for multilingual analysis"},
             )
 
         lang, lang_prob = self._detect_language(text)

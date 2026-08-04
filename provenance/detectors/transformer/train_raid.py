@@ -17,6 +17,113 @@ from transformers import (
 )
 
 
+def normalize_raid_label(label: str | int) -> int:
+    if isinstance(label, int):
+        return label
+    label_str = str(label).strip().lower()
+    if label_str in {"human", "0"}:
+        return 0
+    return 1
+
+
+def compute_class_weights(labels: list[int]) -> np.ndarray:
+    import numpy as np
+
+    labels_arr = np.array(labels)
+    classes, counts = np.unique(labels_arr, return_counts=True)
+    total = len(labels_arr)
+    weights = total / (len(classes) * counts)
+    result = np.zeros(len(classes), dtype=np.float64)
+    for cls, w in zip(classes, weights):
+        result[cls] = w
+    return result
+
+
+def augment_training_texts(
+    texts: list[str],
+    labels: list[int],
+    enabled: bool = True,
+) -> tuple[list[str], list[int]]:
+    import random
+
+    import numpy as np
+
+    if not enabled:
+        return texts, labels
+
+    augmented_texts = list(texts)
+    augmented_labels = list(labels)
+
+    for text, label in zip(texts, labels):
+        words = text.split()
+        if len(words) < 30:
+            continue
+
+        for _ in range(2):
+            aug_words = list(words)
+            n_swap = max(1, len(aug_words) // 10)
+            for _ in range(n_swap):
+                i, j = random.sample(range(len(aug_words)), 2)
+                aug_words[i], aug_words[j] = aug_words[j], aug_words[i]
+            augmented_texts.append(" ".join(aug_words))
+            augmented_labels.append(label)
+
+    return augmented_texts, augmented_labels
+
+
+def prepare_raid_splits(
+    texts: list[str],
+    labels: list[int],
+    eval_size: float = 0.2,
+    seed: int = 42,
+    augment: bool = True,
+):
+    import numpy as np
+    from collections import namedtuple
+
+    PreparedSplits = namedtuple(
+        "PreparedSplits",
+        ["train_texts", "val_texts", "train_labels", "val_labels", "class_weights", "metadata"],
+    )
+
+    if augment:
+        texts, labels = augment_training_texts(texts, labels, enabled=True)
+
+    train_texts, val_texts, train_labels, val_labels = train_test_split(
+        texts, labels, test_size=eval_size, random_state=seed, stratify=labels
+    )
+
+    class_weights = compute_class_weights(train_labels)
+
+    metadata = {
+        "augmentation_enabled": augment,
+        "train_samples": len(train_texts),
+        "val_samples": len(val_texts),
+        "total_samples": len(texts),
+    }
+
+    return PreparedSplits(
+        train_texts=train_texts,
+        val_texts=val_texts,
+        train_labels=train_labels,
+        val_labels=val_labels,
+        class_weights=class_weights,
+        metadata=metadata,
+    )
+
+
+def compute_classification_metrics(eval_pred: tuple) -> dict[str, float]:
+    import numpy as np
+    from sklearn.metrics import accuracy_score, f1_score
+
+    logits, labels = eval_pred
+    preds = np.argmax(logits, axis=1)
+    return {
+        "accuracy": float(accuracy_score(labels, preds)),
+        "f1": float(f1_score(labels, preds)),
+    }
+
+
 def load_raid_dataset(
     sample_limit: int | None = None,
     cache_dir: str | None = None,
